@@ -643,4 +643,37 @@ class DBHelper {
       LIMIT ?
     ''', [days]);
   }
+
+  /// Sales broken down by product for a date range — feeds the "product
+  /// wise" pie chart. [startIso]/[endIsoExclusive] are ISO8601 timestamps;
+  /// the range covers from start (inclusive) to end (exclusive).
+  Future<List<Map<String, dynamic>>> getProductWiseSales({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT si.product_name AS name, SUM(si.subtotal) AS total, SUM(si.quantity) AS qty
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      WHERE s.date >= ? AND s.date < ?
+      GROUP BY si.product_name
+      ORDER BY total DESC
+    ''', [startIso, endIsoExclusive]);
+  }
+
+  /// Sales broken down by payment type (cash / credit / partial) for a date
+  /// range — feeds the "sales vs credit" pie chart.
+  Future<List<Map<String, dynamic>>> getPaymentTypeWiseSales({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT payment_type, SUM(total_amount) AS total
+      FROM sales
+      WHERE date >= ? AND date < ?
+      GROUP BY payment_type
+    ''', [startIso, endIsoExclusive]);
+  }
 }

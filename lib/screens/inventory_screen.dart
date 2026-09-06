@@ -366,6 +366,11 @@ class _ProductFormState extends State<_ProductForm> {
               ),
               const SizedBox(height: 20),
               FilledButton(onPressed: _save, child: const Text('Save Product')),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
               if (widget.product != null) ...[
                 const SizedBox(height: 8),
                 OutlinedButton(

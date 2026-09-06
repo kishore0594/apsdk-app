@@ -1,5 +1,7 @@
 name: Build APK
 
+# Runs automatically on every push to main, and can also be triggered
+# manually from the Actions tab ("Run workflow" button).
 on:
   push:
     branches: [ main ]
@@ -17,6 +19,9 @@ jobs:
         with:
           channel: 'stable'
 
+      # This repo only ships lib/ and pubspec.yaml (see README). If the
+      # android/ folder isn't in the repo yet, generate it automatically
+      # so the build can proceed without any local setup.
       - name: Generate Android project files if missing
         run: |
           if [ ! -d "android" ]; then

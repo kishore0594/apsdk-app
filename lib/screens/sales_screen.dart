@@ -173,7 +173,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
 
   String _paymentType = 'CASH';
   int? _vendorId;
-  int? _pickerProductId;
+  TextEditingController? _pickerController;
   final _discountCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
 
@@ -189,7 +189,6 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     setState(() {
       _products = products;
       _vendors = vendors;
-      _pickerProductId ??= products.isNotEmpty ? products.first['id'] as int : null;
     });
   }
 
@@ -273,60 +272,70 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('New Sale')),
+      appBar: AppBar(
+        title: const Text('New Sale'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    value: _pickerProductId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Product'),
-                    items: _products
-                        .map((p) => DropdownMenuItem(
-                              value: p['id'] as int,
-                              child: Text(
-                                '${p['name']} — ${formatCurrency(p['selling_price'])}/${p['unit']}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setState(() => _pickerProductId = v),
+            child: LayoutBuilder(
+              builder: (context, constraints) => Autocomplete<Map<String, dynamic>>(
+                displayStringForOption: (p) => p['name'] as String,
+                optionsBuilder: (value) {
+                  if (value.text.trim().isEmpty) return const Iterable<Map<String, dynamic>>.empty();
+                  final q = value.text.toLowerCase();
+                  return _products.where((p) => (p['name'] as String).toLowerCase().contains(q));
+                },
+                onSelected: (p) {
+                  _addProduct(p);
+                  _pickerController?.clear();
+                },
+                fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                  _pickerController = controller;
+                  return TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    decoration: const InputDecoration(
+                      labelText: 'Type a product name to search',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                  );
+                },
+                optionsViewBuilder: (context, onSelected, options) => Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation: 4,
+                    borderRadius: BorderRadius.circular(8),
+                    child: SizedBox(
+                      width: constraints.maxWidth,
+                      height: options.length > 4 ? 260 : options.length * 64.0,
+                      child: ListView.builder(
+                        padding: EdgeInsets.zero,
+                        itemCount: options.length,
+                        itemBuilder: (context, i) {
+                          final p = options.elementAt(i);
+                          return ListTile(
+                            dense: true,
+                            title: Text(p['name'] as String),
+                            subtitle: Text(
+                                '${formatCurrency(p['selling_price'])}/${p['unit']} • stock ${p['quantity']}'),
+                            onTap: () => onSelected(p),
+                          );
+                        },
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: FilledButton(
-                    onPressed: _pickerProductId == null
-                        ? null
-                        : () => _addProduct(_products.firstWhere((p) => p['id'] == _pickerProductId)),
-                    child: const Text('Add'),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-          if (_pickerProductId != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Builder(builder: (context) {
-                final p = _products.firstWhere((p) => p['id'] == _pickerProductId,
-                    orElse: () => <String, dynamic>{});
-                if (p.isEmpty) return const SizedBox.shrink();
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'In stock: ${p['quantity']} ${p['unit']}',
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                );
-              }),
-            ),
           const Divider(height: 16),
           Expanded(
             flex: 3,
@@ -338,7 +347,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                   Text('Cart (${_cart.length})', style: Theme.of(context).textTheme.titleMedium),
                   Expanded(
                     child: _cart.isEmpty
-                        ? const Center(child: Text('Tap products above to add them'))
+                        ? const Center(child: Text('Search a product above and tap it to add'))
                         : ListView.builder(
                             itemCount: _cart.length,
                             itemBuilder: (_, i) {

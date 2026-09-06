@@ -282,26 +282,32 @@ class _SupplierTxnTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isPurchase = txn['type'] == 'PURCHASE';
     final txnId = txn['id'] as int;
-    final summary = ListTile(
-      leading: Icon(
-        isPurchase ? Icons.arrow_upward : Icons.arrow_downward,
-        color: isPurchase ? Colors.red : Colors.green,
-      ),
-      title: Text('${isPurchase ? 'Purchase' : 'Payment made'}: ${formatCurrency(txn['amount'])}'),
-      subtitle: Text(
-          '${formatDate(txn['date'] as String)}${(txn['notes'] as String?)?.isNotEmpty == true ? '\n${txn['notes']}' : ''}'),
-      isThreeLine: (txn['notes'] as String?)?.isNotEmpty == true,
-      trailing: Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12)),
-    );
 
-    if (!isPurchase) return summary;
+    final leadingIcon = Icon(
+      isPurchase ? Icons.arrow_upward : Icons.arrow_downward,
+      color: isPurchase ? Colors.red : Colors.green,
+    );
+    final titleText = Text('${isPurchase ? 'Purchase' : 'Payment made'}: ${formatCurrency(txn['amount'])}');
+    final balanceText =
+        Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12));
+
+    if (!isPurchase) {
+      return ListTile(
+        leading: leadingIcon,
+        title: titleText,
+        subtitle: Text(
+            '${formatDate(txn['date'] as String)}${(txn['notes'] as String?)?.isNotEmpty == true ? '\n${txn['notes']}' : ''}'),
+        isThreeLine: (txn['notes'] as String?)?.isNotEmpty == true,
+        trailing: balanceText,
+      );
+    }
 
     // Purchases show which products were received, at what cost.
     return ExpansionTile(
-      leading: summary.leading,
-      title: summary.title,
+      leading: leadingIcon,
+      title: titleText,
       subtitle: Text('${formatDate(txn['date'] as String)} • tap to view products'),
-      trailing: Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12)),
+      trailing: balanceText,
       children: [
         FutureBuilder<List<Map<String, dynamic>>>(
           future: DBHelper.instance.getSupplierPurchaseItems(txnId),
@@ -483,6 +489,11 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 8),
               FilledButton(onPressed: _save, child: const Text('Save Purchase')),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
             ],
           ),
         ),

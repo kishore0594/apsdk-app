@@ -292,27 +292,34 @@ class _TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isCredit = txn['type'] == 'CREDIT';
     final saleId = txn['sale_id'] as int?;
-    final summary = ListTile(
-      leading: Icon(
-        isCredit ? Icons.arrow_upward : Icons.arrow_downward,
-        color: isCredit ? Colors.red : Colors.green,
-      ),
-      title: Text('${isCredit ? 'Credit given' : 'Payment received'}: ${formatCurrency(txn['amount'])}'),
-      subtitle: Text(
-          '${formatDate(txn['date'] as String)}${(txn['notes'] as String?)?.isNotEmpty == true ? '\n${txn['notes']}' : ''}'),
-      isThreeLine: (txn['notes'] as String?)?.isNotEmpty == true,
-      trailing: Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12)),
-    );
 
-    if (saleId == null) return summary;
+    final leadingIcon = Icon(
+      isCredit ? Icons.arrow_upward : Icons.arrow_downward,
+      color: isCredit ? Colors.red : Colors.green,
+    );
+    final titleText =
+        Text('${isCredit ? 'Credit given' : 'Payment received'}: ${formatCurrency(txn['amount'])}');
+    final balanceText =
+        Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12));
+
+    if (saleId == null) {
+      return ListTile(
+        leading: leadingIcon,
+        title: titleText,
+        subtitle: Text(
+            '${formatDate(txn['date'] as String)}${(txn['notes'] as String?)?.isNotEmpty == true ? '\n${txn['notes']}' : ''}'),
+        isThreeLine: (txn['notes'] as String?)?.isNotEmpty == true,
+        trailing: balanceText,
+      );
+    }
 
     // Credit that came from a sale — show which products were purchased.
     return ExpansionTile(
-      title: summary.title,
+      title: titleText,
       subtitle: Text(
           '${formatDate(txn['date'] as String)} • tap to view items purchased'),
-      leading: summary.leading,
-      trailing: Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12)),
+      leading: leadingIcon,
+      trailing: balanceText,
       children: [
         FutureBuilder<List<Map<String, dynamic>>>(
           future: DBHelper.instance.getSaleItems(saleId),
