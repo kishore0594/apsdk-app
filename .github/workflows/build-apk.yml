@@ -28,10 +28,11 @@ jobs:
             flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
           fi
 
-      - name: Set app name to Madhura Agro Traders
+           - name: Set app name to Madhura Agro Traders
         run: |
-          sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
-
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
+          fi
       - name: Install dependencies
         run: flutter pub get
 
