@@ -5,6 +5,7 @@ import '../utils/formatters.dart';
 import 'sales_screen.dart';
 import 'vendors_screen.dart';
 import 'todays_collections_screen.dart';
+import 'data_sync_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -123,7 +124,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Madhura Agro Traders — Store Overview')),
+      appBar: AppBar(
+        title: const Text('Madhura Agro Traders — Store Overview'),
+        actions: [
+          IconButton(
+            tooltip: 'Export / Import Data',
+            icon: const Icon(Icons.sync_alt),
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const DataSyncScreen())),
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(

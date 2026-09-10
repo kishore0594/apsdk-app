@@ -729,4 +729,154 @@ class DBHelper {
       GROUP BY payment_type
     ''', [startIso, endIsoExclusive]);
   }
+
+  // ---------------- DATA EXPORT (full dump, all tables) ----------------
+  // These flatten every table (joining in readable names where useful) for
+  // CSV export. They're read-only reporting queries — none of them are
+  // used for re-importing transactional data, since sales/credit/purchase
+  // entries have side effects (stock levels, running balances) that a raw
+  // row-by-row import can't safely replay.
+
+  Future<List<Map<String, dynamic>>> getAllSalesFlat() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT s.id, s.date, s.payment_type, v.name AS vendor_name,
+             s.subtotal, s.discount, s.total_amount, s.paid_amount, s.notes
+      FROM sales s
+      LEFT JOIN vendors v ON v.id = s.vendor_id
+      ORDER BY s.date DESC
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> getAllSaleItemsFlat() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT si.id, s.date AS sale_date, si.sale_id, si.product_name,
+             si.quantity, si.unit_price, si.subtotal
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id
+      ORDER BY s.date DESC
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> getAllCreditTransactions() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT ct.id, ct.date, v.name AS vendor_name, ct.type, ct.amount,
+             ct.balance_after, ct.notes, ct.sale_id
+      FROM credit_transactions ct
+      JOIN vendors v ON v.id = ct.vendor_id
+      ORDER BY ct.date DESC
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> getAllSupplierTransactions() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT st.id, st.date, s.name AS supplier_name, st.type, st.amount,
+             st.balance_after, st.notes
+      FROM supplier_transactions st
+      JOIN suppliers s ON s.id = st.supplier_id
+      ORDER BY st.date DESC
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> getAllStockMovements() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT sm.id, sm.date, p.name AS product_name, sm.type, sm.quantity,
+             sm.reason, sm.notes
+      FROM stock_movements sm
+      JOIN products p ON p.id = sm.product_id
+      ORDER BY sm.date DESC
+    ''');
+  }
+
+  // ---------------- DATA IMPORT (master data only) ----------------
+  // Products, vendors, and suppliers are simple "catalog" data with no
+  // side effects, so they're safe to sync between two people's phones by
+  // export/import. Matches by name (case-insensitive): updates the
+  // existing row if a match is found, otherwise inserts a new one.
+
+  /// Returns true if an existing product was updated, false if a new one
+  /// was inserted.
+  Future<bool> upsertProductByName(Map<String, dynamic> data) async {
+    final db = await database;
+    final name = (data['name'] as String).trim();
+    final existing = await db.query('products',
+        where: 'LOWER(name) = ?', whereArgs: [name.toLowerCase()], limit: 1);
+    final now = DateTime.now().toIso8601String();
+    if (existing.isNotEmpty) {
+      await db.update('products', {...data, 'updated_at': now},
+          where: 'id = ?', whereArgs: [existing.first['id']]);
+      return true;
+    } else {
+      await db.insert('products', {...data, 'created_at': now, 'updated_at': now});
+      return false;
+    }
+  }
+
+  /// Returns true if an existing vendor was updated, false if a new one
+  /// was inserted. Only touches name/phone/address — never the balance,
+  /// so it can't be used to (accidentally or otherwise) alter what's owed.
+  Future<bool> upsertVendorByName({
+    required String name,
+    String? phone,
+    String? address,
+  }) async {
+    final db = await database;
+    final existing = await db.query('vendors',
+        where: 'LOWER(name) = ?', whereArgs: [name.trim().toLowerCase()], limit: 1);
+    if (existing.isNotEmpty) {
+      await db.update(
+          'vendors',
+          {
+            if (phone != null) 'phone': phone,
+            if (address != null) 'address': address,
+          },
+          where: 'id = ?',
+          whereArgs: [existing.first['id']]);
+      return true;
+    } else {
+      await db.insert('vendors', {
+        'name': name.trim(),
+        'phone': phone ?? '',
+        'address': address ?? '',
+        'opening_balance': 0,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      return false;
+    }
+  }
+
+  /// Same as [upsertVendorByName] but for suppliers.
+  Future<bool> upsertSupplierByName({
+    required String name,
+    String? phone,
+    String? address,
+  }) async {
+    final db = await database;
+    final existing = await db.query('suppliers',
+        where: 'LOWER(name) = ?', whereArgs: [name.trim().toLowerCase()], limit: 1);
+    if (existing.isNotEmpty) {
+      await db.update(
+          'suppliers',
+          {
+            if (phone != null) 'phone': phone,
+            if (address != null) 'address': address,
+          },
+          where: 'id = ?',
+          whereArgs: [existing.first['id']]);
+      return true;
+    } else {
+      await db.insert('suppliers', {
+        'name': name.trim(),
+        'phone': phone ?? '',
+        'address': address ?? '',
+        'opening_balance': 0,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      return false;
+    }
+  }
 }
