@@ -16,7 +16,7 @@ class ApsdkApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const primaryColor = Color(0xFF1E6F5C);
     return MaterialApp(
-      title: 'APSDK',
+      title: 'Madhura Agro Traders',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

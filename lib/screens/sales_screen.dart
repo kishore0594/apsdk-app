@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 
@@ -31,6 +32,7 @@ class SalesScreen extends StatefulWidget {
 class _SalesScreenState extends State<SalesScreen> {
   final _db = DBHelper.instance;
   List<Map<String, dynamic>> _sales = [];
+  List<Map<String, dynamic>> _monthlyTrend = [];
   bool _todayOnly = true;
 
   @override
@@ -42,7 +44,11 @@ class _SalesScreenState extends State<SalesScreen> {
   Future<void> _load() async {
     final filter = _todayOnly ? DateTime.now().toIso8601String().substring(0, 10) : null;
     final sales = await _db.getSales(dateFilter: filter);
-    setState(() => _sales = sales);
+    final trend = await _db.getSalesSummaryByDay(days: 30);
+    setState(() {
+      _sales = sales;
+      _monthlyTrend = trend.reversed.toList();
+    });
   }
 
   Future<void> _viewSale(Map<String, dynamic> sale) async {
@@ -108,6 +114,19 @@ class _SalesScreenState extends State<SalesScreen> {
             child: Text(
               '${_todayOnly ? "Today's" : "Total"} Sales: ${formatCurrency(total)}  (${_sales.length} bills)',
               style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              title: const Text('Monthly Sales Trend', style: TextStyle(fontSize: 14)),
+              subtitle: const Text('Last 30 days', style: TextStyle(fontSize: 11)),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: SizedBox(height: 160, child: _MonthlyTrendChart(data: _monthlyTrend)),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -206,6 +225,46 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
           double.parse((existing.first.quantity + step).toStringAsFixed(2)));
     } else {
       setState(() => _cart.add(_CartLine(product, 1)));
+    }
+  }
+
+  Future<void> _quickAddVendor() async {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final placeCtrl = TextEditingController();
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Add Vendor (Credit Customer)'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name'), autofocus: true),
+            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
+            TextField(controller: placeCtrl, decoration: const InputDecoration(labelText: 'Place')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (saved == true && nameCtrl.text.trim().isNotEmpty) {
+      final newId = await _db.insertVendor({
+        'name': nameCtrl.text.trim(),
+        'phone': phoneCtrl.text.trim(),
+        'address': placeCtrl.text.trim(),
+        'opening_balance': 0,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      final vendors = await _db.getVendors();
+      setState(() {
+        _vendors = vendors;
+        _vendorId = newId;
+      });
     }
   }
 
@@ -423,13 +482,27 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                   ),
                   if (_paymentType != 'CASH') ...[
                     const SizedBox(height: 8),
-                    DropdownButtonFormField<int>(
-                      value: _vendorId,
-                      decoration: const InputDecoration(labelText: 'Vendor (credit customer)'),
-                      items: _vendors
-                          .map((v) => DropdownMenuItem(value: v['id'] as int, child: Text(v['name'] as String)))
-                          .toList(),
-                      onChanged: (v) => setState(() => _vendorId = v),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<int>(
+                            value: _vendorId,
+                            decoration: const InputDecoration(labelText: 'Vendor (credit customer)'),
+                            items: _vendors
+                                .map((v) =>
+                                    DropdownMenuItem(value: v['id'] as int, child: Text(v['name'] as String)))
+                                .toList(),
+                            onChanged: (v) => setState(() => _vendorId = v),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: 'Add new vendor',
+                          onPressed: _quickAddVendor,
+                          icon: const Icon(Icons.person_add),
+                        ),
+                      ],
                     ),
                   ],
                   if (_paymentType == 'PARTIAL') ...[
@@ -458,6 +531,63 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                   FilledButton(onPressed: _checkout, child: const Text('Complete Sale')),
                 ],
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MonthlyTrendChart extends StatelessWidget {
+  final List<Map<String, dynamic>> data;
+  const _MonthlyTrendChart({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    if (data.isEmpty) {
+      return const Center(child: Text('No sales recorded yet.'));
+    }
+    final spots = <FlSpot>[];
+    for (var i = 0; i < data.length; i++) {
+      final total = (data[i]['total'] as num?)?.toDouble() ?? 0;
+      spots.add(FlSpot(i.toDouble(), total));
+    }
+    return LineChart(
+      LineChartData(
+        gridData: const FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              interval: (data.length / 5).clamp(1, data.length).toDouble(),
+              getTitlesWidget: (value, meta) {
+                final i = value.toInt();
+                if (i < 0 || i >= data.length) return const SizedBox.shrink();
+                final day = data[i]['day'] as String? ?? '';
+                final label = day.length >= 10 ? day.substring(8, 10) : day;
+                return Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(label, style: const TextStyle(fontSize: 10)),
+                );
+              },
+            ),
+          ),
+        ),
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            color: Theme.of(context).colorScheme.primary,
+            barWidth: 2.5,
+            dotData: const FlDotData(show: false),
+            belowBarData: BarAreaData(
+              show: true,
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
             ),
           ),
         ],

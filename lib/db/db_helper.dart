@@ -1,7 +1,7 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
-/// Singleton SQLite helper for APSDK.
+/// Singleton SQLite helper for Madhura Agro Traders.
 /// Handles schema creation and all read/write access to the store's data.
 class DBHelper {
   DBHelper._internal();
@@ -17,7 +17,7 @@ class DBHelper {
 
   Future<Database> _initDB() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'apsdk.db');
+    final path = join(dbPath, 'madhura_agro_traders.db');
     return openDatabase(
       path,
       version: 2,
@@ -520,6 +520,59 @@ class DBHelper {
       total += await getVendorBalance(v['id'] as int);
     }
     return total;
+  }
+
+  /// For a vendor with an outstanding balance, returns how many days ago
+  /// their *current, still-unpaid* balance started accumulating. Walks
+  /// their transaction history oldest-to-newest; every time the running
+  /// balance drops to zero (or below) it resets, so this reflects the age
+  /// of what's currently owed, not the vendor's whole history. Returns
+  /// null if the vendor's balance is currently zero (or never went into
+  /// credit).
+  Future<int?> getVendorOutstandingDays(int vendorId) async {
+    final db = await database;
+    final vendor = await db.query('vendors', where: 'id = ?', whereArgs: [vendorId]);
+    if (vendor.isEmpty) return null;
+
+    final txns = await db.query('credit_transactions',
+        where: 'vendor_id = ?', whereArgs: [vendorId], orderBy: 'date ASC');
+
+    double runningBalance = (vendor.first['opening_balance'] as num).toDouble();
+    DateTime? openedSince = runningBalance > 0
+        ? DateTime.parse(vendor.first['created_at'] as String)
+        : null;
+
+    for (final t in txns) {
+      final amount = (t['amount'] as num).toDouble();
+      runningBalance =
+          t['type'] == 'CREDIT' ? runningBalance + amount : runningBalance - amount;
+      if (runningBalance <= 0) {
+        openedSince = null;
+      } else if (openedSince == null) {
+        openedSince = DateTime.parse(t['date'] as String);
+      }
+    }
+
+    if (runningBalance <= 0 || openedSince == null) return null;
+    return DateTime.now().difference(openedSince).inDays;
+  }
+
+  /// Vendors whose current outstanding balance has been unpaid for at
+  /// least [minDays] days — feeds the Dashboard's aging-credit alert.
+  Future<List<Map<String, dynamic>>> getAgingVendors({int minDays = 60}) async {
+    final vendors = await getVendors();
+    final aging = <Map<String, dynamic>>[];
+    for (final v in vendors) {
+      final vendorId = v['id'] as int;
+      final balance = await getVendorBalance(vendorId);
+      if (balance <= 0) continue;
+      final days = await getVendorOutstandingDays(vendorId);
+      if (days != null && days >= minDays) {
+        aging.add({...v, 'balance': balance, 'days_outstanding': days});
+      }
+    }
+    aging.sort((a, b) => (b['days_outstanding'] as int).compareTo(a['days_outstanding'] as int));
+    return aging;
   }
 
   // ---------------- SALES ----------------

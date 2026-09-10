@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
+import 'sales_screen.dart';
+import 'vendors_screen.dart';
+import 'todays_collections_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -17,6 +20,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _todaysCollections = 0;
   double _outstandingCredit = 0;
   List<Map<String, dynamic>> _lowStock = [];
+  List<Map<String, dynamic>> _agingVendors = [];
   List<Map<String, dynamic>> _weeklySales = [];
   bool _loading = true;
 
@@ -42,6 +46,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         0, (sum, c) => sum + (c['amount'] as num).toDouble());
     final outstanding = await _db.getTotalOutstandingCredit();
     final lowStock = await _db.getLowStockProducts();
+    final agingVendors = await _db.getAgingVendors(minDays: 60);
     final weekly = await _db.getSalesSummaryByDay(days: 7);
 
     setState(() {
@@ -49,6 +54,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _todaysCollections = collectionsTotal;
       _outstandingCredit = outstanding;
       _lowStock = lowStock;
+      _agingVendors = agingVendors;
       _weeklySales = weekly.reversed.toList();
       _loading = false;
     });
@@ -117,7 +123,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('APSDK — Store Overview')),
+      appBar: AppBar(title: const Text('Madhura Agro Traders — Store Overview')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -133,6 +139,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           value: formatCurrency(_todaysSales),
                           icon: Icons.point_of_sale,
                           color: Colors.green,
+                          onTap: () => Navigator.push(
+                              context, MaterialPageRoute(builder: (_) => const SalesScreen())),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -142,6 +150,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           value: formatCurrency(_todaysCollections),
                           icon: Icons.payments,
                           color: Colors.blue,
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const TodaysCollectionsScreen())),
                         ),
                       ),
                     ],
@@ -153,6 +163,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     icon: Icons.receipt_long,
                     color: Colors.orange,
                     wide: true,
+                    onTap: () => Navigator.push(
+                        context, MaterialPageRoute(builder: (_) => const VendorsScreen())),
                   ),
                   const SizedBox(height: 24),
                   Text('Sales — last 7 days', style: Theme.of(context).textTheme.titleMedium),
@@ -241,6 +253,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 'In stock: ${p['quantity']} ${p['unit']}  •  Reorder level: ${p['reorder_level']}'),
                           ),
                         )),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Text('Outstanding Vendors (60+ days)', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(width: 8),
+                      if (_agingVendors.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text('${_agingVendors.length}',
+                              style: const TextStyle(color: Colors.white, fontSize: 12)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (_agingVendors.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('No vendor has had an unpaid balance for 60+ days.'),
+                    )
+                  else
+                    ..._agingVendors.map((v) => Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.warning_amber, color: Colors.red),
+                            title: Text(v['name'] as String),
+                            subtitle: Text('Outstanding ${v['days_outstanding']} days'),
+                            trailing: Text(
+                              formatCurrency(v['balance']),
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                            ),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => VendorDetailScreen(vendor: v)),
+                            ),
+                          ),
+                        )),
                 ],
               ),
             ),
@@ -254,6 +305,7 @@ class _StatCard extends StatelessWidget {
   final IconData icon;
   final Color color;
   final bool wide;
+  final VoidCallback? onTap;
 
   const _StatCard({
     required this.label,
@@ -261,25 +313,36 @@ class _StatCard extends StatelessWidget {
     required this.icon,
     required this.color,
     this.wide = false,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Card(
       color: color.withOpacity(0.08),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color),
-            const SizedBox(height: 8),
-            Text(label, style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
-            const SizedBox(height: 4),
-            Text(value,
-                style: TextStyle(
-                    fontSize: wide ? 22 : 18, fontWeight: FontWeight.bold, color: color)),
-          ],
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(icon, color: color),
+                  if (onTap != null) Icon(Icons.chevron_right, color: color.withOpacity(0.6), size: 18),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(label, style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
+              const SizedBox(height: 4),
+              Text(value,
+                  style: TextStyle(
+                      fontSize: wide ? 22 : 18, fontWeight: FontWeight.bold, color: color)),
+            ],
+          ),
         ),
       ),
     );
