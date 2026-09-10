@@ -44,7 +44,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _openStockHistory(Map<String, dynamic> product) async {
-    final history = await _db.getStockHistory(product['id'] as int);
+    final history = await _db.getStockHistory(product['id'] as String);
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -172,7 +172,7 @@ class _ProductFormState extends State<_ProductForm> {
   late final TextEditingController _reorderLevel;
   late final TextEditingController _costPrice;
   late final TextEditingController _sellingPrice;
-  int? _supplierId;
+  String? _supplierId;
   List<Map<String, dynamic>> _suppliers = [];
 
   @override
@@ -188,7 +188,7 @@ class _ProductFormState extends State<_ProductForm> {
     _reorderLevel = TextEditingController(text: (p?['reorder_level'] ?? 0).toString());
     _costPrice = TextEditingController(text: (p?['cost_price'] ?? 0).toString());
     _sellingPrice = TextEditingController(text: (p?['selling_price'] ?? 0).toString());
-    _supplierId = p?['supplier_id'] as int?;
+    _supplierId = p?['supplier_id'] as String?;
     _loadSuppliers();
   }
 
@@ -249,13 +249,13 @@ class _ProductFormState extends State<_ProductForm> {
       data['created_at'] = now;
       await _db.insertProduct(data);
     } else {
-      await _db.updateProduct(widget.product!['id'] as int, data);
+      await _db.updateProduct(widget.product!['id'] as String, data);
     }
     if (mounted) Navigator.pop(context, true);
   }
 
   Future<void> _delete() async {
-    await _db.deleteProduct(widget.product!['id'] as int);
+    await _db.deleteProduct(widget.product!['id'] as String);
     if (mounted) Navigator.pop(context, true);
   }
 
@@ -347,11 +347,11 @@ class _ProductFormState extends State<_ProductForm> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
-                    child: DropdownButtonFormField<int>(
+                    child: DropdownButtonFormField<String>(
                       value: _supplierId,
                       decoration: const InputDecoration(labelText: 'Supplier (optional)'),
                       items: _suppliers
-                          .map((s) => DropdownMenuItem(value: s['id'] as int, child: Text(s['name'] as String)))
+                          .map((s) => DropdownMenuItem(value: s['id'] as String, child: Text(s['name'] as String)))
                           .toList(),
                       onChanged: (v) => setState(() => _supplierId = v),
                     ),

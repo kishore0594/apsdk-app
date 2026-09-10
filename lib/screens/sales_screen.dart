@@ -51,8 +51,72 @@ class _SalesScreenState extends State<SalesScreen> {
     });
   }
 
+  Future<void> _cancelSale(String saleId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cancel this sale?'),
+        content: const Text(
+            'This restores the stock it used and reverses any credit posted to the vendor. '
+            'The sale stays visible for the record, marked as cancelled.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No, keep it')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel Sale'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await _db.cancelSale(saleId);
+    if (mounted) Navigator.pop(context); // close the sale detail sheet
+    _load();
+  }
+
+  Future<void> _modifySale(Map<String, dynamic> sale, List<Map<String, dynamic>> items) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Modify this sale?'),
+        content: const Text(
+            'This cancels the original sale (restoring stock and reversing any credit) and opens '
+            'a new sale pre-filled with the same items, so you can adjust and re-enter it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continue')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await _db.cancelSale(sale['id'] as String);
+    if (mounted) Navigator.pop(context); // close the sale detail sheet
+    if (!mounted) return;
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NewSaleScreen(
+          prefillItems: items,
+          prefillDiscount: (sale['discount'] as num?)?.toDouble() ?? 0,
+          prefillPaymentType: sale['payment_type'] as String? ?? 'CASH',
+          prefillVendorId: sale['vendor_id'] as String?,
+          prefillPaidAmount: (sale['paid_amount'] as num?)?.toDouble() ?? 0,
+        ),
+      ),
+    );
+    if (result == true) {
+      _load();
+    } else {
+      // Even if they backed out of the re-entry, the original was already
+      // cancelled, so the list still needs refreshing.
+      _load();
+    }
+  }
+
   Future<void> _viewSale(Map<String, dynamic> sale) async {
-    final items = await _db.getSaleItems(sale['id'] as int);
+    final items = await _db.getSaleItems(sale['id'] as String);
+    final isCancelled = sale['status'] == 'cancelled';
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -63,7 +127,20 @@ class _SalesScreenState extends State<SalesScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Sale #${sale['id']}', style: Theme.of(context).textTheme.titleLarge),
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Sale #${(sale['id'] as String).substring(0, 6)}',
+                      style: Theme.of(context).textTheme.titleLarge),
+                ),
+                if (isCancelled)
+                  const Chip(
+                    label: Text('CANCELLED', style: TextStyle(fontSize: 11, color: Colors.white)),
+                    backgroundColor: Colors.red,
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
+            ),
             Text(formatDate(sale['date'] as String)),
             const Divider(),
             ...items.map((i) => ListTile(
@@ -82,6 +159,29 @@ class _SalesScreenState extends State<SalesScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
             Chip(label: Text(sale['payment_type'] as String)),
+            if (!isCancelled) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _modifySale(sale, items),
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Modify'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                      onPressed: () => _cancelSale(sale['id'] as String),
+                      icon: const Icon(Icons.cancel_outlined),
+                      label: const Text('Cancel Sale'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -90,7 +190,9 @@ class _SalesScreenState extends State<SalesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final total = _sales.fold<double>(0, (sum, s) => sum + (s['total_amount'] as num));
+    final total = _sales.fold<double>(
+        0, (sum, s) => s['status'] == 'cancelled' ? sum : sum + (s['total_amount'] as num));
+    final activeCount = _sales.where((s) => s['status'] != 'cancelled').length;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sales'),
@@ -112,7 +214,7 @@ class _SalesScreenState extends State<SalesScreen> {
             padding: const EdgeInsets.all(16),
             color: Theme.of(context).colorScheme.primaryContainer,
             child: Text(
-              '${_todayOnly ? "Today's" : "Total"} Sales: ${formatCurrency(total)}  (${_sales.length} bills)',
+              '${_todayOnly ? "Today's" : "Total"} Sales: ${formatCurrency(total)}  ($activeCount bills)',
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
@@ -136,20 +238,38 @@ class _SalesScreenState extends State<SalesScreen> {
                     itemCount: _sales.length,
                     itemBuilder: (_, i) {
                       final s = _sales[i];
+                      final isCancelled = s['status'] == 'cancelled';
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        color: isCancelled ? Colors.grey.shade100 : null,
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: s['payment_type'] == 'CASH'
-                                ? Colors.green.shade100
-                                : Colors.orange.shade100,
+                            backgroundColor: isCancelled
+                                ? Colors.grey.shade300
+                                : (s['payment_type'] == 'CASH'
+                                    ? Colors.green.shade100
+                                    : Colors.orange.shade100),
                             child: Icon(
-                              s['payment_type'] == 'CASH' ? Icons.money : Icons.credit_card,
-                              color: s['payment_type'] == 'CASH' ? Colors.green : Colors.orange,
+                              isCancelled
+                                  ? Icons.block
+                                  : (s['payment_type'] == 'CASH' ? Icons.money : Icons.credit_card),
+                              color: isCancelled
+                                  ? Colors.grey.shade600
+                                  : (s['payment_type'] == 'CASH' ? Colors.green : Colors.orange),
                             ),
                           ),
-                          title: Text(formatCurrency(s['total_amount'])),
-                          subtitle: Text(formatDate(s['date'] as String)),
+                          title: Text(
+                            formatCurrency(s['total_amount']),
+                            style: isCancelled
+                                ? const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.grey)
+                                : null,
+                          ),
+                          subtitle: Text(
+                            isCancelled
+                                ? 'CANCELLED  •  ${formatDate(s['date'] as String)}'
+                                : formatDate(s['date'] as String),
+                            style: isCancelled ? const TextStyle(color: Colors.red) : null,
+                          ),
                           trailing: Text(s['payment_type'] as String),
                           onTap: () => _viewSale(s),
                         ),
@@ -172,7 +292,20 @@ class _SalesScreenState extends State<SalesScreen> {
 }
 
 class NewSaleScreen extends StatefulWidget {
-  const NewSaleScreen({super.key});
+  final List<Map<String, dynamic>>? prefillItems;
+  final double? prefillDiscount;
+  final String? prefillPaymentType;
+  final String? prefillVendorId;
+  final double? prefillPaidAmount;
+
+  const NewSaleScreen({
+    super.key,
+    this.prefillItems,
+    this.prefillDiscount,
+    this.prefillPaymentType,
+    this.prefillVendorId,
+    this.prefillPaidAmount,
+  });
 
   @override
   State<NewSaleScreen> createState() => _NewSaleScreenState();
@@ -191,7 +324,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   final List<_CartLine> _cart = [];
 
   String _paymentType = 'CASH';
-  int? _vendorId;
+  String? _vendorId;
   TextEditingController? _pickerController;
   final _discountCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
@@ -208,6 +341,44 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     setState(() {
       _products = products;
       _vendors = vendors;
+    });
+    _applyPrefill();
+  }
+
+  void _applyPrefill() {
+    final items = widget.prefillItems;
+    if (items == null || items.isEmpty || _cart.isNotEmpty) return;
+    setState(() {
+      for (final item in items) {
+        final pid = item['product_id'] as String?;
+        final qty = (item['quantity'] as num?)?.toDouble() ?? 1;
+        Map<String, dynamic>? liveProduct;
+        if (pid != null) {
+          final matches = _products.where((p) => p['id'] == pid);
+          if (matches.isNotEmpty) liveProduct = matches.first;
+        }
+        final product = liveProduct ??
+            {
+              'id': null,
+              'name': item['product_name'],
+              'unit': 'Nos',
+              'selling_price': item['unit_price'],
+              'quantity': 0,
+            };
+        _cart.add(_CartLine(product, qty));
+      }
+      if (widget.prefillDiscount != null) {
+        _discountCtrl.text = widget.prefillDiscount!.toStringAsFixed(2);
+      }
+      if (widget.prefillPaymentType != null) {
+        _paymentType = widget.prefillPaymentType!;
+      }
+      if (widget.prefillVendorId != null) {
+        _vendorId = widget.prefillVendorId;
+      }
+      if (widget.prefillPaidAmount != null) {
+        _paidCtrl.text = widget.prefillPaidAmount!.toStringAsFixed(2);
+      }
     });
   }
 
@@ -332,7 +503,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Sale'),
+        title: Text(widget.prefillItems != null ? 'Re-enter Sale' : 'New Sale'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -486,12 +657,12 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Expanded(
-                          child: DropdownButtonFormField<int>(
+                          child: DropdownButtonFormField<String>(
                             value: _vendorId,
                             decoration: const InputDecoration(labelText: 'Vendor (credit customer)'),
                             items: _vendors
                                 .map((v) =>
-                                    DropdownMenuItem(value: v['id'] as int, child: Text(v['name'] as String)))
+                                    DropdownMenuItem(value: v['id'] as String, child: Text(v['name'] as String)))
                                 .toList(),
                             onChanged: (v) => setState(() => _vendorId = v),
                           ),

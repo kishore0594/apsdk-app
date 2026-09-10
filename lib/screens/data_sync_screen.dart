@@ -45,7 +45,7 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
 
       final products = await _db.getProducts();
       final suppliers = await _db.getSuppliers();
-      final supplierNameById = {for (final s in suppliers) s['id'] as int: s['name'] as String};
+      final supplierNameById = {for (final s in suppliers) s['id'] as String: s['name'] as String};
       files.add(XFile((await _writeCsv(
         dir,
         'products.csv',
@@ -91,10 +91,10 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
         dir,
         'sales.csv',
         encodeCsv(
-          ['id', 'date', 'payment_type', 'vendor_name', 'subtotal', 'discount', 'total_amount', 'paid_amount', 'notes'],
+          ['id', 'date', 'status', 'payment_type', 'vendor_name', 'subtotal', 'discount', 'total_amount', 'paid_amount', 'notes'],
           sales
               .map((s) => [
-                    s['id'], s['date'], s['payment_type'], s['vendor_name'] ?? '',
+                    s['id'], s['date'], s['status'] ?? 'confirmed', s['payment_type'], s['vendor_name'] ?? '',
                     s['subtotal'], s['discount'], s['total_amount'], s['paid_amount'], s['notes']
                   ])
               .toList(),
@@ -106,9 +106,9 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
         dir,
         'sale_items.csv',
         encodeCsv(
-          ['sale_id', 'sale_date', 'product_name', 'quantity', 'unit_price', 'subtotal'],
+          ['sale_id', 'sale_date', 'status', 'product_name', 'quantity', 'unit_price', 'subtotal'],
           saleItems
-              .map((i) => [i['sale_id'], i['sale_date'], i['product_name'], i['quantity'], i['unit_price'], i['subtotal']])
+              .map((i) => [i['sale_id'], i['sale_date'], i['status'] ?? 'confirmed', i['product_name'], i['quantity'], i['unit_price'], i['subtotal']])
               .toList(),
         ),
       )).path));
@@ -171,7 +171,7 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
       final rows = csvRowsToMaps(parseCsv(content));
       final suppliers = await _db.getSuppliers();
       final supplierIdByName = {
-        for (final s in suppliers) (s['name'] as String).toLowerCase(): s['id'] as int
+        for (final s in suppliers) (s['name'] as String).toLowerCase(): s['id'] as String
       };
       var updated = 0, added = 0, skipped = 0;
       for (final row in rows) {

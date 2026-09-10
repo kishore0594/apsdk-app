@@ -28,11 +28,36 @@ jobs:
             flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
           fi
 
-           - name: Set app name to Madhura Agro Traders
+      - name: Set app name to Madhura Agro Traders
         run: |
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
+
+      # The Firebase config file identifies which cloud project the app
+      # talks to. It's not committed to the repo (so it isn't publicly
+      # visible) — instead it's stored as a repo secret and written out
+      # here at build time. See the README for how to add this secret.
+      - name: Write Firebase config from secret
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      # Wires the Google Services Gradle plugin so the config file above
+      # actually gets picked up. Flutter's Android template has used both
+      # Kotlin DSL (settings.gradle.kts / build.gradle.kts) and the older
+      # Groovy DSL (build.gradle) across versions, so this handles both.
+      - name: Apply Google Services Gradle plugin
+        run: |
+          if [ -f "android/settings.gradle.kts" ]; then
+            echo "Kotlin DSL project detected"
+            sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
+            sed -i '/dev.flutter.flutter-gradle-plugin/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
+          elif [ -f "android/build.gradle" ]; then
+            echo "Groovy DSL project detected"
+            sed -i "/dependencies {/a\\        classpath 'com.google.gms:google-services:4.4.2'" android/build.gradle
+            echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
+          else
+            echo "::error::Couldn't find android/settings.gradle.kts or android/build.gradle — Android project structure may have changed."
+            exit 1
           fi
+
       - name: Install dependencies
         run: flutter pub get
 

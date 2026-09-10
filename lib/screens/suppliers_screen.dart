@@ -12,7 +12,7 @@ class SuppliersScreen extends StatefulWidget {
 class _SuppliersScreenState extends State<SuppliersScreen> {
   final _db = DBHelper.instance;
   List<Map<String, dynamic>> _suppliers = [];
-  Map<int, double> _balances = {};
+  Map<String, double> _balances = {};
 
   @override
   void initState() {
@@ -24,7 +24,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final suppliers = await _db.getSuppliers();
     final balances = <int, double>{};
     for (final s in suppliers) {
-      balances[s['id'] as int] = await _db.getSupplierBalance(s['id'] as int);
+      balances[s['id'] as String] = await _db.getSupplierBalance(s['id'] as String);
     }
     setState(() {
       _suppliers = suppliers;
@@ -148,8 +148,8 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   }
 
   Future<void> _load() async {
-    final txns = await _db.getSupplierTransactions(widget.supplier['id'] as int);
-    final balance = await _db.getSupplierBalance(widget.supplier['id'] as int);
+    final txns = await _db.getSupplierTransactions(widget.supplier['id'] as String);
+    final balance = await _db.getSupplierBalance(widget.supplier['id'] as String);
     setState(() {
       _transactions = txns;
       _balance = balance;
@@ -188,7 +188,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     final amount = double.tryParse(amountCtrl.text) ?? 0;
     if (saved == true && amount > 0) {
       await _db.addSupplierTransaction(
-        supplierId: widget.supplier['id'] as int,
+        supplierId: widget.supplier['id'] as String,
         type: 'PAYMENT',
         amount: amount,
         notes: notesCtrl.text.trim(),
@@ -201,7 +201,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _NewPurchaseSheet(supplierId: widget.supplier['id'] as int),
+      builder: (_) => _NewPurchaseSheet(supplierId: widget.supplier['id'] as String),
     );
     if (result == true) _load();
   }
@@ -281,7 +281,7 @@ class _SupplierTxnTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isPurchase = txn['type'] == 'PURCHASE';
-    final txnId = txn['id'] as int;
+    final txnId = txn['id'] as String;
 
     final leadingIcon = Icon(
       isPurchase ? Icons.arrow_upward : Icons.arrow_downward,
@@ -340,7 +340,7 @@ class _SupplierTxnTile extends StatelessWidget {
 }
 
 class _NewPurchaseSheet extends StatefulWidget {
-  final int supplierId;
+  final String supplierId;
   const _NewPurchaseSheet({required this.supplierId});
 
   @override

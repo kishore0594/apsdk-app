@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import 'sales_screen.dart';
@@ -132,6 +133,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: const Icon(Icons.sync_alt),
             onPressed: () => Navigator.push(
                 context, MaterialPageRoute(builder: (_) => const DataSyncScreen())),
+          ),
+          IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text('Sign out?'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true), child: const Text('Sign out')),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                await FirebaseAuth.instance.signOut();
+              }
+            },
           ),
         ],
       ),

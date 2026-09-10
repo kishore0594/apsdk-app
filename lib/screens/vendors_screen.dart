@@ -12,7 +12,7 @@ class VendorsScreen extends StatefulWidget {
 class _VendorsScreenState extends State<VendorsScreen> {
   final _db = DBHelper.instance;
   List<Map<String, dynamic>> _vendors = [];
-  Map<int, double> _balances = {};
+  Map<String, double> _balances = {};
 
   @override
   void initState() {
@@ -24,7 +24,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
     final vendors = await _db.getVendors();
     final balances = <int, double>{};
     for (final v in vendors) {
-      balances[v['id'] as int] = await _db.getVendorBalance(v['id'] as int);
+      balances[v['id'] as String] = await _db.getVendorBalance(v['id'] as String);
     }
     setState(() {
       _vendors = vendors;
@@ -157,8 +157,8 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   }
 
   Future<void> _load() async {
-    final txns = await _db.getVendorTransactions(widget.vendor['id'] as int);
-    final balance = await _db.getVendorBalance(widget.vendor['id'] as int);
+    final txns = await _db.getVendorTransactions(widget.vendor['id'] as String);
+    final balance = await _db.getVendorBalance(widget.vendor['id'] as String);
     setState(() {
       _transactions = txns;
       _balance = balance;
@@ -194,7 +194,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
     final amount = double.tryParse(amountCtrl.text) ?? 0;
     if (saved == true && amount > 0) {
       await _db.addCreditTransaction(
-        vendorId: widget.vendor['id'] as int,
+        vendorId: widget.vendor['id'] as String,
         type: type,
         amount: amount,
         notes: notesCtrl.text.trim(),
@@ -291,7 +291,7 @@ class _TransactionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isCredit = txn['type'] == 'CREDIT';
-    final saleId = txn['sale_id'] as int?;
+    final saleId = txn['sale_id'] as String?;
 
     final leadingIcon = Icon(
       isCredit ? Icons.arrow_upward : Icons.arrow_downward,
