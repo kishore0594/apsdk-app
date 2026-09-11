@@ -52,17 +52,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
       double salesSum = 0.0;
       for (var doc in results[0].docs) {
-        salesSum += ((doc.data()['amount'] ?? 0) as num).toDouble();
+        final data = doc.data();
+        salesSum += ((data['amount'] ?? 0) as num).toDouble();
       }
 
       double collectionSum = 0.0;
       for (var doc in results[1].docs) {
-        collectionSum += ((doc.data()['amount'] ?? 0) as num).toDouble();
+        final data = doc.data();
+        collectionSum += ((data['amount'] ?? 0) as num).toDouble();
       }
 
       double vCreditSum = 0.0;
       for (var doc in results[2].docs) {
-        vCreditSum += ((doc.data()['currentCredit'] ?? 0) as num).toDouble();
+        final data = doc.data();
+        vCreditSum += ((data['currentCredit'] ?? 0) as num).toDouble();
       }
 
       int lowStock = 0;
@@ -86,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = "Failed to sync: ${e.toString()}";
+          _errorMessage = "Sync issue: ${e.toString()}";
         });
       }
     } finally {
