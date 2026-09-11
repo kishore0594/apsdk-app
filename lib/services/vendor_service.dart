@@ -27,7 +27,7 @@ class VendorService {
 
     await _db.runTransaction((transaction) async {
       final snapshot = await transaction.get(vendorRef);
-      if (!snapshot.exists) throw Exception("Vendor not found.");
+      if (!snapshot.exists) throw Exception("Vendor document missing.");
 
       final double currentCredit = ((snapshot.data()?['currentCredit'] ?? 0) as num).toDouble();
       final double newCredit = currentCredit + amount;

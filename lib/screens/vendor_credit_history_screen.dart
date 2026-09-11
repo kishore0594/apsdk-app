@@ -32,8 +32,11 @@ class VendorCreditHistoryScreen extends StatelessWidget {
               final double amount = ((data['amount'] ?? 0) as num).toDouble();
               return ListTile(
                 title: Text(data['note'] ?? ''),
-                subtitle: Text('New Balance: ₹${((data['newCredit'] ?? 0) as num).toStringAsFixed(2)}'),
-                trailing: Text('₹${amount.toStringAsFixed(2)}', style: TextStyle(color: amount > 0 ? Colors.red : Colors.green, fontWeight: FontWeight.bold)),
+                subtitle: Text('Balance: ₹${((data['newCredit'] ?? 0) as num).toStringAsFixed(2)}'),
+                trailing: Text(
+                  '₹${amount.toStringAsFixed(2)}',
+                  style: TextStyle(color: amount > 0 ? Colors.red : Colors.green, fontWeight: FontWeight.bold),
+                ),
               );
             },
           );

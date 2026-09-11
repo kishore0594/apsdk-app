@@ -1,22 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'screens/vendor_credit_screen.dart';
+import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-  );
-
-  runApp(const MyApp());
+  runApp(const MadhuraAgroApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MadhuraAgroApp extends StatelessWidget {
+  const MadhuraAgroApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -24,10 +17,10 @@ class MyApp extends StatelessWidget {
       title: 'Madhura Agro Traders',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
       ),
-      home: const VendorCreditScreen(),
+      home: const HomeScreen(),
     );
   }
 }

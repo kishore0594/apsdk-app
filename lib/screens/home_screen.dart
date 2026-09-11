@@ -48,7 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = "Failed to load dashboard: ${e.toString()}";
+          _errorMessage = "Failed to sync home screen data: ${e.toString()}";
         });
       }
     } finally {
@@ -68,35 +68,30 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.green.shade700,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _fetchDashboardData,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _fetchDashboardData),
         ],
       ),
-      body: _buildContent(),
+      body: _buildBody(),
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildBody() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.green),
-      );
+      return const Center(child: CircularProgressIndicator(color: Colors.green));
     }
 
     if (_errorMessage != null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: _fetchDashboardData,
-              child: const Text('Retry'),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+              const SizedBox(height: 16),
+              ElevatedButton(onPressed: _fetchDashboardData, child: const Text('Retry')),
+            ],
+          ),
         ),
       );
     }
@@ -104,23 +99,34 @@ class _HomeScreenState extends State<HomeScreen> {
     return RefreshIndicator(
       onRefresh: _fetchDashboardData,
       child: ListView(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(16),
         children: [
           Card(
+            elevation: 3,
             child: ListTile(
               title: const Text('Total Vendor Credit'),
-              subtitle: Text('₹${_totalVendorCredit.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              subtitle: Text('₹${_totalVendorCredit.toStringAsFixed(2)}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.orange)),
             ),
           ),
           const SizedBox(height: 12),
-          ElevatedButton(
+          Card(
+            elevation: 3,
+            child: ListTile(
+              title: const Text('Total Vendors'),
+              subtitle: Text('$_totalVendors', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.store),
+            label: const Text('Manage Vendor Credits'),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const VendorListScreen()),
               ).then((_) => _fetchDashboardData());
             },
-            child: const Text('View All Vendors'),
           ),
         ],
       ),
