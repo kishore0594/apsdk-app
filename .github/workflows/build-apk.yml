@@ -59,9 +59,11 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # Explicitly set compileSdk to 36 inside build.gradle / build.gradle.kts
+      # Force compileSdk=36 via gradle.properties and build script
       - name: Raise compileSdk for plugin compatibility
         run: |
+          echo "android.compileSdk=36" >> android/gradle.properties
+          
           GRADLE_FILE=""
           if [ -f "android/app/build.gradle.kts" ]; then
             GRADLE_FILE="android/app/build.gradle.kts"
@@ -82,14 +84,10 @@ jobs:
 
             echo "--- AFTER ($GRADLE_FILE) ---"
             cat "$GRADLE_FILE"
-          else
-            echo "::error::No android/app/build.gradle(.kts) found to patch."
-            exit 1
           fi
 
-      # Build APK passing the Gradle property via --extra-build-args
       - name: Build release APK
-        run: flutter build apk --release --extra-build-args="-Pandroid.compileSdk=36"
+        run: flutter build apk --release
 
       - name: Upload APK as a downloadable artifact
         uses: actions/upload-artifact@v4
