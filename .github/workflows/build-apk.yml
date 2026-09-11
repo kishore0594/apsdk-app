@@ -72,10 +72,7 @@ jobs:
       # Some plugins (file_picker's dependency chain, in this project)
       # need a newer Android compileSdk than Flutter's template sets by
       # default. This matches compileSdk (Kotlin DSL) or compileSdkVersion
-      # (Groovy DSL) with either an "=" or space separator, and inserts the
-      # line if it's missing entirely rather than assuming an exact match —
-      # the file's actual before/after content is printed so this is
-      # never a guessing game again.
+      # (Groovy DSL) and sets it directly to 36.
       - name: Raise compileSdk for plugin compatibility
         run: |
           GRADLE_FILE=""
@@ -89,8 +86,9 @@ jobs:
             echo "--- BEFORE ($GRADLE_FILE) ---"
             cat "$GRADLE_FILE"
 
-            if grep -q "compileSdk" "$GRADLE_FILE"; then
-              sed -i -E 's/^([[:space:]]*compileSdk(Version)?[[:space:]]*[= ][[:space:]]*).*/\1 36/' "$GRADLE_FILE"
+            if grep -E -q "compileSdk(Version)?" "$GRADLE_FILE"; then
+              sed -i -E 's/compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+/compileSdk = 36/g' "$GRADLE_FILE"
+              sed -i -E 's/compileSdkVersion[[:space:]]+[0-9]+/compileSdkVersion 36/g' "$GRADLE_FILE"
             else
               sed -i '/android[[:space:]]*{/a\    compileSdk = 36' "$GRADLE_FILE"
             fi
@@ -103,7 +101,7 @@ jobs:
           fi
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --extra-front-end-options=--no-implicit-casts || flutter build apk --release -- -Pandroid.compileSdk=36
 
       - name: Upload APK as a downloadable artifact
         uses: actions/upload-artifact@v4
