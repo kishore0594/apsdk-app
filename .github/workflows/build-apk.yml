@@ -19,11 +19,7 @@ jobs:
         with:
           channel: 'stable'
 
-      # This repo only ships lib/ and pubspec.yaml (see README). If the
-      # android/ folder isn't in the repo yet — or exists but is missing
-      # its actual app files (e.g. from a stray/partial folder) — wipe it
-      # and regenerate cleanly, so the build can proceed without any
-      # local setup.
+      # Clean/regenerate Android folder if missing or corrupted
       - name: Generate Android project files if missing
         run: |
           if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
@@ -40,17 +36,11 @@ jobs:
         run: |
           sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
 
-      # The Firebase config file identifies which cloud project the app
-      # talks to. It's not committed to the repo (so it isn't publicly
-      # visible) — instead it's stored as a repo secret and written out
-      # here at build time. See the README for how to add this secret.
+      # Write Firebase config secret
       - name: Write Firebase config from secret
         run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
 
-      # Wires the Google Services Gradle plugin so the config file above
-      # actually gets picked up. Flutter's Android template has used both
-      # Kotlin DSL (settings.gradle.kts / build.gradle.kts) and the older
-      # Groovy DSL (build.gradle) across versions, so this handles both.
+      # Apply Google Services Gradle plugin for both Kotlin DSL and Groovy DSL
       - name: Apply Google Services Gradle plugin
         run: |
           if [ -f "android/settings.gradle.kts" ]; then
@@ -69,10 +59,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # Some plugins (file_picker's dependency chain, in this project)
-      # need a newer Android compileSdk than Flutter's template sets by
-      # default. This matches compileSdk (Kotlin DSL) or compileSdkVersion
-      # (Groovy DSL) and sets it directly to 36.
+      # Explicitly set compileSdk to 36 inside build.gradle / build.gradle.kts
       - name: Raise compileSdk for plugin compatibility
         run: |
           GRADLE_FILE=""
@@ -100,8 +87,9 @@ jobs:
             exit 1
           fi
 
+      # Build APK passing the Gradle property via --extra-build-args
       - name: Build release APK
-        run: flutter build apk --release --extra-front-end-options=--no-implicit-casts || flutter build apk --release -- -Pandroid.compileSdk=36
+        run: flutter build apk --release --extra-build-args="-Pandroid.compileSdk=36"
 
       - name: Upload APK as a downloadable artifact
         uses: actions/upload-artifact@v4
