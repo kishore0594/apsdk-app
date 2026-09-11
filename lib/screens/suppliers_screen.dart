@@ -22,7 +22,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
 
   Future<void> _load() async {
     final suppliers = await _db.getSuppliers();
-    final balances = <int, double>{};
+    final balances = <String, double>{};
     for (final s in suppliers) {
       balances[s['id'] as String] = await _db.getSupplierBalance(s['id'] as String);
     }
