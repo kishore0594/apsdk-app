@@ -30,7 +30,6 @@ jobs:
       - name: Generate Android project files if missing
         run: |
           if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "Android project missing — regenerating..."
             rm -rf android
             flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
           fi
