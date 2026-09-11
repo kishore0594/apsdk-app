@@ -59,37 +59,17 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # Inject subprojects block to force compileSdk=36 on all subprojects/plugins
+      # Force compileSdk 36 on all subprojects and dependencies using safe printf strings
       - name: Force compileSdk 36 on all subprojects and dependencies
         run: |
           echo "android.compileSdk=36" >> android/gradle.properties
 
           if [ -f "android/build.gradle" ]; then
-            cat << 'EOF' >> android/build.gradle
-
-subprojects {
-    afterEvaluate { project ->
-        if (project.hasProperty('android')) {
-            project.android {
-                compileSdkVersion 36
-            }
-        }
-    }
-}
-EOF
+            printf '\nsubprojects {\n    afterEvaluate { project ->\n        if (project.hasProperty("android")) {\n            project.android {\n                compileSdkVersion 36\n            }\n        }\n    }\n}\n' >> android/build.gradle
           fi
 
           if [ -f "android/build.gradle.kts" ]; then
-            cat << 'EOF' >> android/build.gradle.kts
-
-subprojects {
-    afterEvaluate {
-        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
-            compileSdkVersion(36)
-        }
-    }
-}
-EOF
+            printf '\nsubprojects {\n    afterEvaluate {\n        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {\n            compileSdkVersion(36)\n        }\n    }\n}\n' >> android/build.gradle.kts
           fi
 
           GRADLE_FILE=""
