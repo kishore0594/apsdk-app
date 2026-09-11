@@ -307,13 +307,15 @@ class DBHelper {
   /// Records credit given (sale on credit) or a payment/collection from a
   /// vendor, keeping the vendor's balance field in sync inside a
   /// transaction so two phones recording collections at the same time
-  /// can't clobber each other.
+  /// can't clobber each other. Pass [date] to backdate an entry (e.g.
+  /// entering old credit history) — defaults to now if omitted.
   Future<void> addCreditTransaction({
     required String vendorId,
     required String type, // CREDIT or PAYMENT
     required double amount,
     String? notes,
     String? saleId,
+    String? date,
   }) async {
     final vendorRef = _vendors.doc(vendorId);
     await _fs.runTransaction((txn) async {
@@ -324,7 +326,7 @@ class DBHelper {
       txn.set(_creditTxns.doc(), {
         'vendor_id': vendorId,
         'vendor_name': data['name'],
-        'date': DateTime.now().toIso8601String(),
+        'date': date ?? DateTime.now().toIso8601String(),
         'type': type,
         'amount': amount,
         'balance_after': newBalance,
@@ -373,17 +375,14 @@ class DBHelper {
   Future<int?> getVendorOutstandingDays(String vendorId) async {
     final vendorDoc = await _vendors.doc(vendorId).get();
     if (!vendorDoc.exists) return null;
-    final vendorData = vendorDoc.data() as Map<String, dynamic>;
 
     final snap = await _creditTxns
         .where('vendor_id', isEqualTo: vendorId)
         .orderBy('date')
         .get();
 
-    double runningBalance = (vendorData['opening_balance'] as num?)?.toDouble() ?? 0;
-    DateTime? openedSince = runningBalance > 0 && vendorData['created_at'] != null
-        ? DateTime.tryParse(vendorData['created_at'] as String)
-        : null;
+    double runningBalance = 0;
+    DateTime? openedSince;
 
     for (final doc in snap.docs) {
       final t = doc.data() as Map<String, dynamic>;

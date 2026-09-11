@@ -69,6 +69,19 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # Some plugins (file_picker's dependency chain, in this project)
+      # need a newer Android compileSdk than Flutter's template sets by
+      # default. Bumping just compileSdk (not minSdk/targetSdk) is the
+      # narrowest fix — it only affects which APIs are available to
+      # compile against, not runtime behavior or device compatibility.
+      - name: Raise compileSdk for plugin compatibility
+        run: |
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
+          elif [ -f "android/app/build.gradle" ]; then
+            sed -i 's/compileSdkVersion[[:space:]]*flutter\.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle
+          fi
+
       - name: Build release APK
         run: flutter build apk --release
 

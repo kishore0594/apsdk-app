@@ -46,39 +46,75 @@ class _VendorsScreenState extends State<VendorsScreen> {
     final phoneCtrl = TextEditingController();
     final addressCtrl = TextEditingController();
     final openingCtrl = TextEditingController(text: '0');
+    DateTime creditDate = DateTime.now();
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Add Vendor (Credit Customer)'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
-            TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Place')),
-            TextField(
-              controller: openingCtrl,
-              decoration: const InputDecoration(labelText: 'Opening balance owed'),
-              keyboardType: TextInputType.number,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Add Vendor (Credit Customer)'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+                TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
+                TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Place')),
+                TextField(
+                  controller: openingCtrl,
+                  decoration: const InputDecoration(labelText: 'Opening balance owed'),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Credit given on', style: TextStyle(fontSize: 13)),
+                  subtitle: Text(formatDay(creditDate.toIso8601String())),
+                  trailing: const Icon(Icons.calendar_today, size: 18),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: creditDate,
+                      firstDate: DateTime(2015),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) setDialogState(() => creditDate = picked);
+                  },
+                ),
+                const Text(
+                  'Only matters if there\'s an opening balance — sets when that old credit '
+                  'actually started, so day-tracking is accurate from the start.',
+                  style: TextStyle(fontSize: 11, color: Colors.black54),
+                ),
+              ],
             ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-        ],
       ),
     );
 
     if (saved == true && nameCtrl.text.trim().isNotEmpty) {
-      await _db.insertVendor({
+      final newVendorId = await _db.insertVendor({
         'name': nameCtrl.text.trim(),
         'phone': phoneCtrl.text.trim(),
         'address': addressCtrl.text.trim(),
-        'opening_balance': double.tryParse(openingCtrl.text) ?? 0,
+        'opening_balance': 0,
         'created_at': DateTime.now().toIso8601String(),
       });
+      final openingAmount = double.tryParse(openingCtrl.text) ?? 0;
+      if (openingAmount > 0) {
+        await _db.addCreditTransaction(
+          vendorId: newVendorId,
+          type: 'CREDIT',
+          amount: openingAmount,
+          notes: 'Opening balance',
+          date: creditDate.toIso8601String(),
+        );
+      }
       _load();
     }
   }
@@ -168,26 +204,54 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   Future<void> _recordTransaction(String type) async {
     final amountCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
+    DateTime txnDate = DateTime.now();
+
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(type == 'CREDIT' ? 'Record Credit Given' : 'Record Payment Collected'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: amountCtrl,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Amount'),
-              autofocus: true,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(type == 'CREDIT' ? 'Record Credit Given' : 'Record Payment Collected'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'Amount'),
+                  autofocus: true,
+                ),
+                TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notes (optional)')),
+                const SizedBox(height: 8),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Date', style: TextStyle(fontSize: 13)),
+                  subtitle: Text(formatDay(txnDate.toIso8601String())),
+                  trailing: const Icon(Icons.calendar_today, size: 18),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: txnDate,
+                      firstDate: DateTime(2015),
+                      lastDate: DateTime.now(),
+                    );
+                    if (picked != null) setDialogState(() => txnDate = picked);
+                  },
+                ),
+                if (type == 'CREDIT')
+                  const Text(
+                    'Backdate this if you\'re entering old credit history — keeps '
+                    'day-outstanding tracking accurate.',
+                    style: TextStyle(fontSize: 11, color: Colors.black54),
+                  ),
+              ],
             ),
-            TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notes (optional)')),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
-        ],
       ),
     );
 
@@ -198,6 +262,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
         type: type,
         amount: amount,
         notes: notesCtrl.text.trim(),
+        date: txnDate.toIso8601String(),
       );
       _load();
     }
