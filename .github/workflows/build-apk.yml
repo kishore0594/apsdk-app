@@ -1,7 +1,5 @@
 name: Build APK
 
-# Runs automatically on every push to main, and can also be triggered
-# manually from the Actions tab ("Run workflow" button).
 on:
   push:
     branches: [ main ]
@@ -11,56 +9,60 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the repo
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Flutter
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true
 
-      # Clean/regenerate Android folder if missing or corrupted
+      - name: Set up Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Generate Android project files if missing
         run: |
           if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "Android project missing or incomplete — regenerating"
+            echo "Android project missing — regenerating..."
             rm -rf android
             flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
           fi
-          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "::error::AndroidManifest.xml still missing after flutter create — something about the Flutter/Android toolchain may have changed."
-            exit 1
-          fi
 
-      - name: Set app name to Madhura Agro Traders
+      - name: Set app name
         run: |
           sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
 
-      # Write Firebase config secret
       - name: Write Firebase config from secret
-        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+        env:
+          FIREBASE_CONFIG: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$FIREBASE_CONFIG" ]; then
+            echo "::warning::GOOGLE_SERVICES_JSON secret is empty or missing!"
+          else
+            echo "$FIREBASE_CONFIG" > android/app/google-services.json
+          fi
 
-      # Apply Google Services Gradle plugin for both Kotlin DSL and Groovy DSL
       - name: Apply Google Services Gradle plugin
         run: |
           if [ -f "android/settings.gradle.kts" ]; then
-            echo "Kotlin DSL project detected"
             sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
             sed -i '/dev.flutter.flutter-gradle-plugin/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
           elif [ -f "android/build.gradle" ]; then
-            echo "Groovy DSL project detected"
             sed -i "/dependencies {/a\\        classpath 'com.google.gms:google-services:4.4.2'" android/build.gradle
             echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
-          else
-            echo "::error::Couldn't find android/settings.gradle.kts or android/build.gradle — Android project structure may have changed."
-            exit 1
           fi
 
       - name: Install dependencies
         run: flutter pub get
 
-      # Safely force compileSdk 36 on all subprojects checking project evaluation state
-      - name: Force compileSdk 36 on all subprojects and dependencies
+      - name: Force compileSdk 36 across all project modules
         run: |
           echo "android.compileSdk=36" >> android/gradle.properties
 
@@ -69,7 +71,7 @@ jobs:
           fi
 
           if [ -f "android/build.gradle.kts" ]; then
-            printf '\nsubprojects {\n    val configProject: Project.() -> Unit = {\n        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {\n            compileSdkVersion(36)\n        }\n    }\n    if (state.executed) {\n        configProject()\n    } else {\n        afterEvaluate { configProject() }\n    }\n}\n' >> android/build.gradle.kts
+            printf '\nsubprojects {\n    val configProject: Project.() -> Unit = {\n        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {\n            compileSdkVersion(36)\n        }\n    }\n    if (state.executed) {\n        configProject()\n    } else {\n        afterEvaluate { configProject()\n    }\n}\n' >> android/build.gradle.kts
           fi
 
           GRADLE_FILE=""
@@ -91,7 +93,7 @@ jobs:
       - name: Build release APK
         run: flutter build apk --release
 
-      - name: Upload APK as a downloadable artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: madhura-agro-traders-release-apk
