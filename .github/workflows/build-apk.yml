@@ -20,12 +20,20 @@ jobs:
           channel: 'stable'
 
       # This repo only ships lib/ and pubspec.yaml (see README). If the
-      # android/ folder isn't in the repo yet, generate it automatically
-      # so the build can proceed without any local setup.
+      # android/ folder isn't in the repo yet — or exists but is missing
+      # its actual app files (e.g. from a stray/partial folder) — wipe it
+      # and regenerate cleanly, so the build can proceed without any
+      # local setup.
       - name: Generate Android project files if missing
         run: |
-          if [ ! -d "android" ]; then
+          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
+            echo "Android project missing or incomplete — regenerating"
+            rm -rf android
             flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
+          fi
+          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
+            echo "::error::AndroidManifest.xml still missing after flutter create — something about the Flutter/Android toolchain may have changed."
+            exit 1
           fi
 
       - name: Set app name to Madhura Agro Traders
