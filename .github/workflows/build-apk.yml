@@ -59,17 +59,17 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # Force compileSdk 36 on all subprojects and dependencies using safe printf strings
+      # Safely force compileSdk 36 on all subprojects checking project evaluation state
       - name: Force compileSdk 36 on all subprojects and dependencies
         run: |
           echo "android.compileSdk=36" >> android/gradle.properties
 
           if [ -f "android/build.gradle" ]; then
-            printf '\nsubprojects {\n    afterEvaluate { project ->\n        if (project.hasProperty("android")) {\n            project.android {\n                compileSdkVersion 36\n            }\n        }\n    }\n}\n' >> android/build.gradle
+            printf '\nsubprojects {\n    def configProject = { proj ->\n        if (proj.hasProperty("android")) {\n            proj.android.compileSdkVersion 36\n        }\n    }\n    if (project.state.executed) {\n        configProject(project)\n    } else {\n        project.afterEvaluate { configProject(project) }\n    }\n}\n' >> android/build.gradle
           fi
 
           if [ -f "android/build.gradle.kts" ]; then
-            printf '\nsubprojects {\n    afterEvaluate {\n        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {\n            compileSdkVersion(36)\n        }\n    }\n}\n' >> android/build.gradle.kts
+            printf '\nsubprojects {\n    val configProject: Project.() -> Unit = {\n        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {\n            compileSdkVersion(36)\n        }\n    }\n    if (state.executed) {\n        configProject()\n    } else {\n        afterEvaluate { configProject() }\n    }\n}\n' >> android/build.gradle.kts
           fi
 
           GRADLE_FILE=""
