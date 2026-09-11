@@ -62,32 +62,53 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Force compileSdk 36 across all project modules
+      - name: Configure compileSdk 36 safely
         run: |
           echo "android.compileSdk=36" >> android/gradle.properties
 
+          # Safely patch Groovy build.gradle if present
           if [ -f "android/build.gradle" ]; then
-            printf '\nsubprojects {\n    def configProject = { proj ->\n        if (proj.hasProperty("android")) {\n            proj.android.compileSdkVersion 36\n        }\n    }\n    if (project.state.executed) {\n        configProject(project)\n    } else {\n        project.afterEvaluate { configProject(project) }\n    }\n}\n' >> android/build.gradle
+            cat << 'GEOF' >> android/build.gradle
+
+subprojects {
+    project.configurations.configureEach {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'com.android.support') {
+                details.useVersion '28.0.0'
+            }
+        }
+    }
+    afterEvaluate { p ->
+        if (p.hasProperty('android')) {
+            p.android {
+                compileSdkVersion 36
+            }
+        }
+    }
+}
+GEOF
           fi
 
+          # Safely patch Kotlin build.gradle.kts if present
           if [ -f "android/build.gradle.kts" ]; then
-            printf '\nsubprojects {\n    val configProject: Project.() -> Unit = {\n        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {\n            compileSdkVersion(36)\n        }\n    }\n    if (state.executed) {\n        configProject()\n    } else {\n        afterEvaluate { configProject()\n    }\n}\n' >> android/build.gradle.kts
+            cat << 'KEOF' >> android/build.gradle.kts
+
+subprojects {
+    afterEvaluate {
+        val androidObj = extensions.findByName("android")
+        if (androidObj is com.android.build.gradle.BaseExtension) {
+            androidObj.compileSdkVersion(36)
+        }
+    }
+}
+KEOF
           fi
 
-          GRADLE_FILE=""
+          # Patch app level build file
           if [ -f "android/app/build.gradle.kts" ]; then
-            GRADLE_FILE="android/app/build.gradle.kts"
+            sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/g' android/app/build.gradle.kts
           elif [ -f "android/app/build.gradle" ]; then
-            GRADLE_FILE="android/app/build.gradle"
-          fi
-
-          if [ -n "$GRADLE_FILE" ]; then
-            if grep -E -q "compileSdk(Version)?" "$GRADLE_FILE"; then
-              sed -i -E 's/compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+/compileSdk = 36/g' "$GRADLE_FILE"
-              sed -i -E 's/compileSdkVersion[[:space:]]+[0-9]+/compileSdkVersion 36/g' "$GRADLE_FILE"
-            else
-              sed -i '/android[[:space:]]*{/a\    compileSdk = 36' "$GRADLE_FILE"
-            fi
+            sed -i -E 's/compileSdkVersion[[:space:]]+[0-9]+/compileSdkVersion 36/g' android/app/build.gradle
           fi
 
       - name: Build release APK
