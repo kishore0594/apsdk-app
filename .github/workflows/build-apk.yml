@@ -1,166 +1,5 @@
 name: Build APK
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@v4
-
-      - name: Install Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Install Android SDK 36
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
-
-      - name: Generate Android project files if missing
-        run: |
-          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "Android project missing or incomplete — regenerating"
-            rm -rf android
-            flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
-          fi
-
-          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "::error::AndroidManifest.xml is missing after flutter create."
-            exit 1
-          fi
-
-      - name: Set app name to Madhura Agro Traders
-        run: |
-          sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/'             android/app/src/main/AndroidManifest.xml
-
-      - name: Write Firebase config from secret
-        run: |
-          test -n '${{ secrets.GOOGLE_SERVICES_JSON }}' || {
-            echo "::error::GOOGLE_SERVICES_JSON repository secret is missing."
-            exit 1
-          }
-          printf '%s' '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
-
-      - name: Apply Google Services Gradle plugin
-        run: |
-          if [ -f "android/settings.gradle.kts" ]; then
-            echo "Kotlin DSL project detected"
-            grep -q 'com.google.gms.google-services' android/settings.gradle.kts ||               sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
-
-            grep -q 'com.google.gms.google-services' android/app/build.gradle.kts ||               sed -i '/dev.flutter.flutter-gradle-plugin/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
-
-          elif [ -f "android/build.gradle" ]; then
-            echo "Groovy DSL project detected"
-            grep -q 'com.google.gms:google-services' android/build.gradle ||               sed -i "/dependencies {/a\        classpath 'com.google.gms:google-services:4.4.2'" android/build.gradle
-
-            grep -q "com.google.gms.google-services" android/app/build.gradle ||               echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
-          else
-            echo "::error::Couldn't find a supported Android Gradle project."
-            exit 1
-          fi
-
-      # The failure in the previous build was:
-      #   :file_picker is currently compiled against android-34
-      #   while flutter_plugin_android_lifecycle requires Android API 36.
-      #
-      # file_picker 10.3.10 is a stable release compatible with modern
-      # Flutter/Dart, and we also force its Android library module to compile
-      # against API 36 so the AAR metadata check cannot remain at 34.
-      - name: Pin file_picker to an Android-36-compatible release
-        run: |
-          if grep -qE '^[[:space:]]*file_picker:' pubspec.yaml; then
-            flutter pub add 'file_picker:^10.3.10'
-          else
-            echo "file_picker is not a direct dependency; leaving dependencies unchanged."
-          fi
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Force app and file_picker compileSdk to 36
-        shell: bash
-        run: |
-          set -e
-
-          # App module: Flutter templates use either Kotlin DSL or Groovy DSL.
-          if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i -E               's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/g'               android/app/build.gradle.kts
-
-            grep -qE 'compileSdk[[:space:]]*=' android/app/build.gradle.kts ||               sed -i '/android {/a\    compileSdk = 36' android/app/build.gradle.kts
-
-          elif [ -f "android/app/build.gradle" ]; then
-            sed -i -E               's/compileSdkVersion[[:space:]]+flutter\.compileSdkVersion/compileSdkVersion 36/g'               android/app/build.gradle
-
-            grep -qE 'compileSdkVersion[[:space:]]+36' android/app/build.gradle ||               sed -i '/android {/a\    compileSdkVersion 36' android/app/build.gradle
-          fi
-
-          # The exact error shown in the supplied build log is caused by the
-          # file_picker Android library still declaring compileSdk 34.
-          PUB_CACHE_DIR="${PUB_CACHE:-$HOME/.pub-cache}"
-          PICKER_DIR="$(find "$PUB_CACHE_DIR/hosted/pub.dev" -maxdepth 1 -type d             -name 'file_picker-*' | sort -V | tail -1 || true)"
-
-          if [ -n "$PICKER_DIR" ]; then
-            echo "Patching file_picker at: $PICKER_DIR"
-
-            if [ -f "$PICKER_DIR/android/build.gradle.kts" ]; then
-              sed -i -E                 's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/g;
-                 s/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/g'                 "$PICKER_DIR/android/build.gradle.kts"
-
-              if ! grep -qE 'compileSdk[[:space:]]*=[[:space:]]*36'                   "$PICKER_DIR/android/build.gradle.kts"; then
-                sed -i '/android {/a\    compileSdk = 36'                   "$PICKER_DIR/android/build.gradle.kts"
-              fi
-
-            elif [ -f "$PICKER_DIR/android/build.gradle" ]; then
-              sed -i -E                 's/compileSdkVersion[[:space:]]+flutter\.compileSdkVersion/compileSdkVersion 36/g;
-                 s/compileSdkVersion[[:space:]]+[0-9]+/compileSdkVersion 36/g;
-                 s/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/g;
-                 s/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/g'                 "$PICKER_DIR/android/build.gradle"
-
-              if ! grep -qE '(compileSdkVersion[[:space:]]+36|compileSdk[[:space:]]*=[[:space:]]*36)'                   "$PICKER_DIR/android/build.gradle"; then
-                sed -i '/android {/a\    compileSdkVersion 36'                   "$PICKER_DIR/android/build.gradle"
-              fi
-            fi
-
-            echo "file_picker compileSdk declaration:"
-            grep -nE 'compileSdk' "$PICKER_DIR/android/build.gradle"* || true
-          else
-            echo "::warning::file_picker directory was not found in PUB_CACHE."
-          fi
-
-      - name: Clean Flutter and Gradle caches
-        run: |
-          flutter clean
-          rm -rf android/.gradle android/build
-          flutter pub get
-
-      - name: Verify Android configuration
-        run: |
-          echo "Flutter:"
-          flutter --version
-          echo "Android app compileSdk:"
-          grep -nE 'compileSdk' android/app/build.gradle* || true
-          echo "Resolved file_picker:"
-          flutter pub deps --style=compact | grep -E 'file_picker|flutter_plugin_android_lifecycle' || true
-
-      - name: Build release APK
-        run: flutter build apk --release
-
-      - name: Upload APK as a downloadable artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: madhura-agro-traders-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-WFEOF'
-name: Build APK
-
 # Runs automatically on every push to main, and can also be triggered
 # manually from the Actions tab ("Run workflow" button).
 on:
@@ -232,15 +71,35 @@ jobs:
 
       # Some plugins (file_picker's dependency chain, in this project)
       # need a newer Android compileSdk than Flutter's template sets by
-      # default. Bumping just compileSdk (not minSdk/targetSdk) is the
-      # narrowest fix — it only affects which APIs are available to
-      # compile against, not runtime behavior or device compatibility.
+      # default. This matches compileSdk (Kotlin DSL) or compileSdkVersion
+      # (Groovy DSL) with either an "=" or space separator, and inserts the
+      # line if it's missing entirely rather than assuming an exact match —
+      # the file's actual before/after content is printed so this is
+      # never a guessing game again.
       - name: Raise compileSdk for plugin compatibility
         run: |
+          GRADLE_FILE=""
           if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i 's/compileSdk[[:space:]]*=[[:space:]]*flutter\.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
+            GRADLE_FILE="android/app/build.gradle.kts"
           elif [ -f "android/app/build.gradle" ]; then
-            sed -i 's/compileSdkVersion[[:space:]]*flutter\.compileSdkVersion/compileSdkVersion 36/' android/app/build.gradle
+            GRADLE_FILE="android/app/build.gradle"
+          fi
+
+          if [ -n "$GRADLE_FILE" ]; then
+            echo "--- BEFORE ($GRADLE_FILE) ---"
+            cat "$GRADLE_FILE"
+
+            if grep -q "compileSdk" "$GRADLE_FILE"; then
+              sed -i -E 's/^([[:space:]]*compileSdk(Version)?[[:space:]]*[= ][[:space:]]*).*/\1 36/' "$GRADLE_FILE"
+            else
+              sed -i '/android[[:space:]]*{/a\    compileSdk = 36' "$GRADLE_FILE"
+            fi
+
+            echo "--- AFTER ($GRADLE_FILE) ---"
+            cat "$GRADLE_FILE"
+          else
+            echo "::error::No android/app/build.gradle(.kts) found to patch."
+            exit 1
           fi
 
       - name: Build release APK
