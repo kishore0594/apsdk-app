@@ -59,11 +59,39 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # Force compileSdk=36 via gradle.properties and build script
-      - name: Raise compileSdk for plugin compatibility
+      # Inject subprojects block to force compileSdk=36 on all subprojects/plugins
+      - name: Force compileSdk 36 on all subprojects and dependencies
         run: |
           echo "android.compileSdk=36" >> android/gradle.properties
-          
+
+          if [ -f "android/build.gradle" ]; then
+            cat << 'EOF' >> android/build.gradle
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
+                compileSdkVersion 36
+            }
+        }
+    }
+}
+EOF
+          fi
+
+          if [ -f "android/build.gradle.kts" ]; then
+            cat << 'EOF' >> android/build.gradle.kts
+
+subprojects {
+    afterEvaluate {
+        extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.apply {
+            compileSdkVersion(36)
+        }
+    }
+}
+EOF
+          fi
+
           GRADLE_FILE=""
           if [ -f "android/app/build.gradle.kts" ]; then
             GRADLE_FILE="android/app/build.gradle.kts"
@@ -72,18 +100,12 @@ jobs:
           fi
 
           if [ -n "$GRADLE_FILE" ]; then
-            echo "--- BEFORE ($GRADLE_FILE) ---"
-            cat "$GRADLE_FILE"
-
             if grep -E -q "compileSdk(Version)?" "$GRADLE_FILE"; then
               sed -i -E 's/compileSdk(Version)?[[:space:]]*=?[[:space:]]*[0-9]+/compileSdk = 36/g' "$GRADLE_FILE"
               sed -i -E 's/compileSdkVersion[[:space:]]+[0-9]+/compileSdkVersion 36/g' "$GRADLE_FILE"
             else
               sed -i '/android[[:space:]]*{/a\    compileSdk = 36' "$GRADLE_FILE"
             fi
-
-            echo "--- AFTER ($GRADLE_FILE) ---"
-            cat "$GRADLE_FILE"
           fi
 
       - name: Build release APK
