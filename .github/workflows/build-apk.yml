@@ -24,15 +24,29 @@ jobs:
       # its actual app files (e.g. from a stray/partial folder) — wipe it
       # and regenerate cleanly, so the build can proceed without any
       # local setup.
+      # Checks for the manifest AND the app-level Gradle file (not just
+      # one of them) before deciding the Android project is complete —
+      # a partial/stray commit that includes only some Android files
+      # (e.g. from manually editing android/ outside this workflow)
+      # would otherwise fool a single-file check into skipping
+      # regeneration, leaving a broken half-project behind.
       - name: Generate Android project files if missing
         run: |
-          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "Android project missing or incomplete — regenerating"
+          COMPLETE=true
+          [ -f "android/app/src/main/AndroidManifest.xml" ] || COMPLETE=false
+          [ -f "android/app/build.gradle.kts" ] || [ -f "android/app/build.gradle" ] || COMPLETE=false
+
+          if [ "$COMPLETE" = false ]; then
+            echo "Android project missing or incomplete — regenerating from scratch"
             rm -rf android
             flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
           fi
-          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
-            echo "::error::AndroidManifest.xml still missing after flutter create — something about the Flutter/Android toolchain may have changed."
+
+          COMPLETE=true
+          [ -f "android/app/src/main/AndroidManifest.xml" ] || COMPLETE=false
+          [ -f "android/app/build.gradle.kts" ] || [ -f "android/app/build.gradle" ] || COMPLETE=false
+          if [ "$COMPLETE" = false ]; then
+            echo "::error::Android project still incomplete after flutter create — something about the Flutter/Android toolchain may have changed."
             exit 1
           fi
 
