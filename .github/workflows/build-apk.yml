@@ -1,5 +1,7 @@
-name: Build Release APK
+name: Build APK
 
+# Runs automatically on every push to main, and can also be triggered
+# manually from the Actions tab ("Run workflow" button).
 on:
   push:
     branches: [ main ]
@@ -9,52 +11,92 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out the repo
         uses: actions/checkout@v4
 
-      - name: Set up Java JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Set up Flutter
+      - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true
 
-      - name: Set up Gradle Cache
-        uses: gradle/actions/setup-gradle@v4
+      # This repo only ships lib/ and pubspec.yaml (see README). If the
+      # android/ folder isn't in the repo yet — or exists but is missing
+      # its actual app files (e.g. from a stray/partial folder) — wipe it
+      # and regenerate cleanly, so the build can proceed without any
+      # local setup.
+      - name: Generate Android project files if missing
+        run: |
+          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
+            echo "Android project missing or incomplete — regenerating"
+            rm -rf android
+            flutter create --platforms=android --project-name madhura_agro_traders --org com.yourstore .
+          fi
+          if [ ! -f "android/app/src/main/AndroidManifest.xml" ]; then
+            echo "::error::AndroidManifest.xml still missing after flutter create — something about the Flutter/Android toolchain may have changed."
+            exit 1
+          fi
+
+      - name: Set app name to Madhura Agro Traders
+        run: |
+          sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
+
+      # The Firebase config file identifies which cloud project the app
+      # talks to. It's not committed to the repo (so it isn't publicly
+      # visible) — instead it's stored as a repo secret and written out
+      # here at build time. See the README for how to add this secret.
+      - name: Write Firebase config from secret
+        run: echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      # Wires the Google Services Gradle plugin so the config file above
+      # actually gets picked up. Flutter's Android template has used both
+      # Kotlin DSL (settings.gradle.kts / build.gradle.kts) and the older
+      # Groovy DSL (build.gradle) across versions, so this handles both.
+      - name: Apply Google Services Gradle plugin
+        run: |
+          if [ -f "android/settings.gradle.kts" ]; then
+            echo "Kotlin DSL project detected"
+            sed -i '/^plugins {/a\    id("com.google.gms.google-services") version "4.4.2" apply false' android/settings.gradle.kts
+            sed -i '/dev.flutter.flutter-gradle-plugin/a\    id("com.google.gms.google-services")' android/app/build.gradle.kts
+          elif [ -f "android/build.gradle" ]; then
+            echo "Groovy DSL project detected"
+            sed -i "/dependencies {/a\\        classpath 'com.google.gms:google-services:4.4.2'" android/build.gradle
+            echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
+          else
+            echo "::error::Couldn't find android/settings.gradle.kts or android/build.gradle — Android project structure may have changed."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Configure compileSdk 36 safely
+      # Some plugins (file_picker's dependency chain, in this project)
+      # need a newer Android compileSdk than Flutter's template sets by
+      # default. Rather than finding and replacing a specific line (which
+      # depends on guessing the exact format Flutter generated), this
+      # simply appends an override at the end of the file — Gradle applies
+      # the last assignment to a property, so this works regardless of
+      # what's already in the file.
+      - name: Raise compileSdk for plugin compatibility
         run: |
-          echo "android.compileSdk=36" >> android/gradle.properties
-
-          if [ -f "android/build.gradle.kts" ]; then
-            echo "" >> android/build.gradle.kts
-            echo "subprojects {" >> android/build.gradle.kts
-            echo "    val configAction: () -> Unit = {" >> android/build.gradle.kts
-            echo "        val androidObj = extensions.findByName(\"android\")" >> android/build.gradle.kts
-            echo "        if (androidObj is com.android.build.gradle.BaseExtension) {" >> android/build.gradle.kts
-            echo "            androidObj.compileSdkVersion(36)" >> android/build.gradle.kts
-            echo "        }" >> android/build.gradle.kts
-            echo "    }" >> android/build.gradle.kts
-            echo "    if (state.executed) { configAction() } else { afterEvaluate { configAction() } }" >> android/build.gradle.kts
-            echo "}" >> android/build.gradle.kts
-          fi
-
           if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/g' android/app/build.gradle.kts
+            echo "" >> android/app/build.gradle.kts
+            echo "android.compileSdk = 36" >> android/app/build.gradle.kts
+            echo "--- Resulting android/app/build.gradle.kts ---"
+            cat android/app/build.gradle.kts
+          elif [ -f "android/app/build.gradle" ]; then
+            echo "" >> android/app/build.gradle
+            echo "android.compileSdkVersion = 36" >> android/app/build.gradle
+            echo "--- Resulting android/app/build.gradle ---"
+            cat android/app/build.gradle
+          else
+            echo "::error::No android/app/build.gradle(.kts) found to patch."
+            exit 1
           fi
 
       - name: Build release APK
         run: flutter build apk --release
 
-      - name: Upload APK artifact
+      - name: Upload APK as a downloadable artifact
         uses: actions/upload-artifact@v4
         with:
           name: madhura-agro-traders-release-apk
