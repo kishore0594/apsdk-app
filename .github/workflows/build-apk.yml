@@ -90,21 +90,33 @@ jobs:
       # simply appends an override at the end of the file — Gradle applies
       # the last assignment to a property, so this works regardless of
       # what's already in the file.
-      - name: Raise compileSdk for plugin compatibility
+      # The error is specifically from the *file_picker plugin's own*
+      # Gradle module (":file_picker:checkReleaseAarMetadata"), not our
+      # app module — so patching android/app/build.gradle.kts (our app
+      # only) never touched it, which is why compileSdk kept showing as
+      # 34 no matter what. The fix has to apply to every module (app +
+      # every plugin, including file_picker) at once, via a root-level
+      # "subprojects" block — this is the standard fix for this exact
+      # class of Flutter/Gradle plugin-compileSdk-mismatch error.
+      - name: Force compileSdk 36 across app and all plugin modules
         run: |
+          cat >> android/build.gradle.kts << 'GRADLEEOF'
+
+          subprojects {
+              afterEvaluate {
+                  extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.let {
+                      it.compileSdkVersion(36)
+                  }
+              }
+          }
+          GRADLEEOF
+          echo "--- Resulting android/build.gradle.kts ---"
+          cat android/build.gradle.kts
+
+          # Keep the app-level override too, as a belt-and-suspenders backup.
           if [ -f "android/app/build.gradle.kts" ]; then
             echo "" >> android/app/build.gradle.kts
             echo "android.compileSdk = 36" >> android/app/build.gradle.kts
-            echo "--- Resulting android/app/build.gradle.kts ---"
-            cat android/app/build.gradle.kts
-          elif [ -f "android/app/build.gradle" ]; then
-            echo "" >> android/app/build.gradle
-            echo "android.compileSdkVersion = 36" >> android/app/build.gradle
-            echo "--- Resulting android/app/build.gradle ---"
-            cat android/app/build.gradle
-          else
-            echo "::error::No android/app/build.gradle(.kts) found to patch."
-            exit 1
           fi
 
       - name: Build release APK
