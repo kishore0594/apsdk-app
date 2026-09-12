@@ -103,10 +103,15 @@ jobs:
           cat >> android/build.gradle.kts << 'GRADLEEOF'
 
           subprojects {
-              afterEvaluate {
+              val applyCompileSdk: () -> Unit = {
                   extensions.findByType(com.android.build.gradle.BaseExtension::class.java)?.let {
                       it.compileSdkVersion(36)
                   }
+              }
+              if (state.executed) {
+                  applyCompileSdk()
+              } else {
+                  afterEvaluate { applyCompileSdk() }
               }
           }
           GRADLEEOF
