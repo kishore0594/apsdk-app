@@ -13,6 +13,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   final _db = DBHelper.instance;
   List<Map<String, dynamic>> _products = [];
   String _search = '';
+  String _categoryFilter = 'All';
 
   @override
   void initState() {
@@ -23,6 +24,28 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Future<void> _load() async {
     final products = await _db.getProducts(search: _search);
     setState(() => _products = products);
+  }
+
+  List<String> get _categoryChips {
+    final cats = _products
+        .map((p) => (p['category'] as String? ?? '').trim())
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return ['All', ...cats, 'Low Stock'];
+  }
+
+  List<Map<String, dynamic>> get _filteredProducts {
+    if (_categoryFilter == 'All') return _products;
+    if (_categoryFilter == 'Low Stock') {
+      return _products.where((p) {
+        final qty = (p['quantity'] as num).toDouble();
+        final reorder = (p['reorder_level'] as num).toDouble();
+        return qty <= reorder;
+      }).toList();
+    }
+    return _products.where((p) => (p['category'] as String? ?? '') == _categoryFilter).toList();
   }
 
   String _productSubtitle(Map<String, dynamic> p) {
@@ -93,6 +116,24 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(title: const Text('Inventory')),
       body: Column(
         children: [
+          SizedBox(
+            height: 44,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              children: _categoryChips.map((cat) {
+                final selected = _categoryFilter == cat;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(cat),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _categoryFilter = cat),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -107,12 +148,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ),
           ),
           Expanded(
-            child: _products.isEmpty
+            child: _filteredProducts.isEmpty
                 ? const Center(child: Text('No products yet. Tap + to add one.'))
                 : ListView.builder(
-                    itemCount: _products.length,
+                    itemCount: _filteredProducts.length,
                     itemBuilder: (_, i) {
-                      final p = _products[i];
+                      final p = _filteredProducts[i];
                       final qty = (p['quantity'] as num).toDouble();
                       final reorder = (p['reorder_level'] as num).toDouble();
                       final low = qty <= reorder;

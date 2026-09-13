@@ -128,6 +128,37 @@ class _VendorsScreenState extends State<VendorsScreen> {
     }
   }
 
+  Future<void> _quickCollectPayment(String vendorId, String vendorName) async {
+    final amountCtrl = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Collect Payment — $vendorName'),
+        content: TextField(
+          controller: amountCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(labelText: 'Amount'),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    final amount = double.tryParse(amountCtrl.text) ?? 0;
+    if (saved != true || amount <= 0) return;
+    try {
+      await _db.addCreditTransaction(vendorId: vendorId, type: 'PAYMENT', amount: amount);
+      _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not record payment: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final totalOutstanding = _balances.values.fold<double>(0, (sum, b) => sum + b);
@@ -156,12 +187,31 @@ class _VendorsScreenState extends State<VendorsScreen> {
                           leading: CircleAvatar(child: Text((v['name'] as String)[0].toUpperCase())),
                           title: Text(v['name'] as String),
                           subtitle: Text(_vendorSubtitle(v)),
-                          trailing: Text(
-                            formatCurrency(balance),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: balance > 0 ? Colors.red : Colors.green,
-                            ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                formatCurrency(balance),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: balance > 0 ? Colors.red : Colors.green,
+                                ),
+                              ),
+                              if (balance > 0) ...[
+                                const SizedBox(width: 8),
+                                TextButton.icon(
+                                  onPressed: () => _quickCollectPayment(
+                                      v['id'] as String, v['name'] as String),
+                                  icon: const Icon(Icons.payments, size: 16),
+                                  label: const Text('Payment'),
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                           onTap: () async {
                             await Navigator.push(

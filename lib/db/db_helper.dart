@@ -437,6 +437,7 @@ class DBHelper {
     required double paidAmount,
     String? notes,
     String? saleDate,
+    String? dueDate,
   }) async {
     final subtotal = items.fold<double>(
         0, (sum, item) => sum + (item['quantity'] as num) * (item['unit_price'] as num));
@@ -481,11 +482,22 @@ class DBHelper {
         'paid_amount': paidAmount,
         'notes': notes,
         'status': 'confirmed',
+        'due_date': dueDate,
       });
 
       for (final item in items) {
         final qty = (item['quantity'] as num).toDouble();
         final price = (item['unit_price'] as num).toDouble();
+        final pid = item['product_id'] as String?;
+        // Snapshot cost + category at time of sale (not just now, in case
+        // the product's price/category changes later) — feeds the Gross
+        // Profit and By-Category numbers on Reports & Trends.
+        final unitCost = (pid != null && productData.containsKey(pid))
+            ? (productData[pid]!['cost_price'] as num?)?.toDouble() ?? 0
+            : 0.0;
+        final category = (pid != null && productData.containsKey(pid))
+            ? (productData[pid]!['category'] as String? ?? '')
+            : '';
         txn.set(_saleItems.doc(), {
           'sale_id': saleRef.id,
           'sale_date': now,
@@ -494,10 +506,11 @@ class DBHelper {
           'quantity': qty,
           'unit_price': price,
           'subtotal': qty * price,
+          'unit_cost': unitCost,
+          'category': category,
           'status': 'confirmed',
         });
 
-        final pid = item['product_id'] as String?;
         if (pid != null && productRefs.containsKey(pid)) {
           final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
           txn.update(productRefs[pid]!, {
@@ -726,6 +739,80 @@ class DBHelper {
       totals[type] = (totals[type] ?? 0) + ((data['total_amount'] as num?)?.toDouble() ?? 0);
     }
     return totals.entries.map((e) => {'payment_type': e.key, 'total': e.value}).toList();
+  }
+
+  /// Revenue (post-discount total actually invoiced), cost of goods sold
+  /// (from each sale item's cost snapshot), the resulting gross profit,
+  /// and the number of sales — feeds Reports & Trends and the Dashboard's
+  /// Gross Profit card. Revenue/count come from `sales`; cost comes from
+  /// `sale_items`, since that's where the per-line cost is recorded.
+  Future<Map<String, dynamic>> getRevenueCostProfit({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    final salesSnap = await _sales
+        .where('date', isGreaterThanOrEqualTo: startIso)
+        .where('date', isLessThan: endIsoExclusive)
+        .get();
+    double revenue = 0;
+    int count = 0;
+    for (final doc in salesSnap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['status'] == 'cancelled') continue;
+      revenue += (data['total_amount'] as num?)?.toDouble() ?? 0;
+      count++;
+    }
+
+    final itemsSnap = await _saleItems
+        .where('sale_date', isGreaterThanOrEqualTo: startIso)
+        .where('sale_date', isLessThan: endIsoExclusive)
+        .get();
+    double cost = 0;
+    for (final doc in itemsSnap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['status'] == 'cancelled') continue;
+      final qty = (data['quantity'] as num?)?.toDouble() ?? 0;
+      final unitCost = (data['unit_cost'] as num?)?.toDouble() ?? 0;
+      cost += qty * unitCost;
+    }
+
+    return {'revenue': revenue, 'cost': cost, 'profit': revenue - cost, 'count': count};
+  }
+
+  /// Sales broken down by product category for a date range — feeds the
+  /// "By Category" section of Reports & Trends. Products added before
+  /// this feature existed (or with no category set) group under "—".
+  Future<List<Map<String, dynamic>>> getCategoryWiseSales({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    final snap = await _saleItems
+        .where('sale_date', isGreaterThanOrEqualTo: startIso)
+        .where('sale_date', isLessThan: endIsoExclusive)
+        .get();
+    final totals = <String, double>{};
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['status'] == 'cancelled') continue;
+      final category = (data['category'] as String?)?.trim();
+      final key = (category == null || category.isEmpty) ? '—' : category;
+      totals[key] = (totals[key] ?? 0) + ((data['subtotal'] as num?)?.toDouble() ?? 0);
+    }
+    final result = totals.entries.map((e) => {'category': e.key, 'total': e.value}).toList();
+    result.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    return result;
+  }
+
+  /// Total currently owed to all suppliers combined — the supplier-side
+  /// counterpart to getTotalOutstandingCredit.
+  Future<double> getTotalSupplierDues() async {
+    final snap = await _suppliers.get();
+    double total = 0;
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      total += (data['balance'] as num?)?.toDouble() ?? 0;
+    }
+    return total;
   }
 
   // ---------------- DATA EXPORT (full dump, all tables) ----------------

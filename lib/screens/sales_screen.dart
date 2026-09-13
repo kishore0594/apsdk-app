@@ -124,6 +124,7 @@ class _SalesScreenState extends State<SalesScreen> {
           prefillVendorId: sale['vendor_id'] as String?,
           prefillPaidAmount: (sale['paid_amount'] as num?)?.toDouble() ?? 0,
           prefillDate: sale['date'] as String?,
+          prefillDueDate: sale['due_date'] as String?,
         ),
       ),
     );
@@ -210,6 +211,20 @@ class _SalesScreenState extends State<SalesScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
             Chip(label: Text(sale['payment_type'] as String)),
+            if (sale['due_date'] != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Builder(builder: (context) {
+                  final due = DateTime.tryParse(sale['due_date'] as String);
+                  final overdue = due != null && !isCancelled && due.isBefore(DateTime.now());
+                  return Text(
+                    'Credit due · ${formatDay(sale['due_date'] as String)}',
+                    style: TextStyle(
+                        color: overdue ? Colors.red : Colors.black54,
+                        fontWeight: overdue ? FontWeight.bold : FontWeight.normal),
+                  );
+                }),
+              ),
             if (!isCancelled) ...[
               const SizedBox(height: 16),
               Row(
@@ -318,9 +333,12 @@ class _SalesScreenState extends State<SalesScreen> {
                           subtitle: Text(
                             isCancelled
                                 ? 'CANCELLED  •  ${formatDate(s['date'] as String)}'
-                                : formatDate(s['date'] as String),
+                                : s['due_date'] != null
+                                    ? '${formatDate(s['date'] as String)}\nDue ${formatDay(s['due_date'] as String)}'
+                                    : formatDate(s['date'] as String),
                             style: isCancelled ? const TextStyle(color: Colors.red) : null,
                           ),
+                          isThreeLine: !isCancelled && s['due_date'] != null,
                           trailing: Text(s['payment_type'] as String),
                           onTap: () => _viewSale(s),
                           onLongPress: () => _showSaleActions(s),
@@ -350,6 +368,7 @@ class NewSaleScreen extends StatefulWidget {
   final String? prefillVendorId;
   final double? prefillPaidAmount;
   final String? prefillDate;
+  final String? prefillDueDate;
 
   const NewSaleScreen({
     super.key,
@@ -359,6 +378,7 @@ class NewSaleScreen extends StatefulWidget {
     this.prefillVendorId,
     this.prefillPaidAmount,
     this.prefillDate,
+    this.prefillDueDate,
   });
 
   @override
@@ -380,6 +400,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   String _paymentType = 'CASH';
   String? _vendorId;
   DateTime _saleDate = DateTime.now();
+  DateTime? _dueDate;
   TextEditingController? _pickerController;
   final _discountCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
@@ -437,6 +458,9 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
       if (widget.prefillDate != null) {
         final parsed = DateTime.tryParse(widget.prefillDate!);
         if (parsed != null) _saleDate = parsed;
+      }
+      if (widget.prefillDueDate != null) {
+        _dueDate = DateTime.tryParse(widget.prefillDueDate!);
       }
     });
   }
@@ -555,6 +579,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
         vendorId: _vendorId,
         paidAmount: paid,
         saleDate: _saleDate.toIso8601String(),
+        dueDate: _dueDate?.toIso8601String(),
       );
     } catch (e) {
       if (mounted) {
@@ -766,6 +791,34 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                           icon: const Icon(Icons.person_add),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Payment due by (optional)', style: TextStyle(fontSize: 13)),
+                      subtitle: Text(_dueDate != null ? formatDay(_dueDate!.toIso8601String()) : 'Not set'),
+                      trailing: Wrap(
+                        spacing: 4,
+                        children: [
+                          if (_dueDate != null)
+                            IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () => setState(() => _dueDate = null),
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.calendar_today, size: 18),
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: _dueDate ?? _saleDate.add(const Duration(days: 30)),
+                                firstDate: _saleDate,
+                                lastDate: DateTime(2035),
+                              );
+                              if (picked != null) setState(() => _dueDate = picked);
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                   if (_paymentType == 'PARTIAL') ...[

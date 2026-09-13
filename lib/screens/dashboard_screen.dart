@@ -7,6 +7,8 @@ import 'sales_screen.dart';
 import 'vendors_screen.dart';
 import 'todays_collections_screen.dart';
 import 'data_sync_screen.dart';
+import 'suppliers_screen.dart';
+import 'reports_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -21,6 +23,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _todaysSales = 0;
   double _todaysCollections = 0;
   double _outstandingCredit = 0;
+  double _supplierDues = 0;
+  double _todaysGrossProfit = 0;
   List<Map<String, dynamic>> _lowStock = [];
   List<Map<String, dynamic>> _agingVendors = [];
   List<Map<String, dynamic>> _weeklySales = [];
@@ -47,6 +51,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _error = null;
     });
     try {
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day).toIso8601String();
+      final todayEnd = DateTime(now.year, now.month, now.day).add(const Duration(days: 1)).toIso8601String();
+
       // Run every independent query at once instead of one after another —
       // this is what made the Dashboard feel slow, since these used to
       // wait on each other in sequence.
@@ -57,10 +65,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _db.getLowStockProducts(),
         _db.getAgingVendors(minDays: 60),
         _db.getSalesSummaryByDay(days: 7),
+        _db.getTotalSupplierDues(),
+        _db.getRevenueCostProfit(startIso: todayStart, endIsoExclusive: todayEnd),
       ]);
       final collections = results[1] as List<Map<String, dynamic>>;
       final collectionsTotal =
           collections.fold<double>(0, (sum, c) => sum + (c['amount'] as num).toDouble());
+      final profitData = results[7] as Map<String, dynamic>;
 
       setState(() {
         _todaysSales = results[0] as double;
@@ -69,6 +80,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _lowStock = results[3] as List<Map<String, dynamic>>;
         _agingVendors = results[4] as List<Map<String, dynamic>>;
         _weeklySales = (results[5] as List<Map<String, dynamic>>).reversed.toList();
+        _supplierDues = results[6] as double;
+        _todaysGrossProfit = (profitData['profit'] as num?)?.toDouble() ?? 0;
         _loading = false;
       });
 
@@ -151,6 +164,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('Madhura Agro Traders — Store Overview'),
         actions: [
+          IconButton(
+            tooltip: 'Reports & Trends',
+            icon: const Icon(Icons.bar_chart),
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const ReportsScreen())),
+          ),
           IconButton(
             tooltip: 'Export / Import Data',
             icon: const Icon(Icons.sync_alt),
@@ -237,6 +256,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     wide: true,
                     onTap: () => Navigator.push(
                         context, MaterialPageRoute(builder: (_) => const VendorsScreen())),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _StatCard(
+                          label: "Today's Gross Profit",
+                          value: formatCurrency(_todaysGrossProfit),
+                          icon: Icons.trending_up,
+                          color: Colors.teal,
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const ReportsScreen())),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _StatCard(
+                          label: 'Supplier Dues',
+                          value: formatCurrency(_supplierDues),
+                          icon: Icons.local_shipping,
+                          color: Colors.brown,
+                          onTap: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => const SuppliersScreen())),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 24),
                   Text('Sales — last 7 days', style: Theme.of(context).textTheme.titleMedium),
