@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
+import '../utils/app_logo.dart';
+import '../utils/app_info.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -243,7 +245,30 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 barColor: const Color(0xFF7C3AED),
                               ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 28),
+                      // Version footer — makes it unambiguous which build
+                      // is installed when reporting an issue.
+                      Center(
+                        child: Column(
+                          children: [
+                            const AppLogo(size: 34),
+                            const SizedBox(height: 8),
+                            Text(
+                              AppInfo.appName,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade600),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              AppInfo.versionLine,
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
                     ],
                   ),
                 ),

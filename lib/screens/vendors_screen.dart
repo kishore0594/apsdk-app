@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
+import '../utils/app_theme.dart';
 
 class VendorsScreen extends StatefulWidget {
   const VendorsScreen({super.key});
@@ -11,35 +12,6 @@ class VendorsScreen extends StatefulWidget {
 
 class _VendorsScreenState extends State<VendorsScreen> {
   final _db = DBHelper.instance;
-  List<Map<String, dynamic>> _vendors = [];
-  Map<String, double> _balances = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final vendors = await _db.getVendors();
-      // getVendors() already includes each vendor's balance field — no
-      // need for a separate query per vendor (that loop was the real
-      // cause of the multi-second delay after any change).
-      final balances = <String, double>{
-        for (final v in vendors) v['id'] as String: (v['balance'] as num?)?.toDouble() ?? 0
-      };
-      setState(() {
-        _vendors = vendors;
-        _balances = balances;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not load vendors: $e')));
-      }
-    }
-  }
 
   String _vendorSubtitle(Map<String, dynamic> v) {
     final phone = v['phone'] as String? ?? '';
@@ -124,7 +96,9 @@ class _VendorsScreenState extends State<VendorsScreen> {
           date: creditDate.toIso8601String(),
         );
       }
-      _load();
+      // No manual refresh needed — the list below is a live stream, so it
+      // (and the phone this vendor was added on, even if it was offline a
+      // moment ago) updates on its own the instant this write lands.
     }
   }
 
@@ -150,7 +124,6 @@ class _VendorsScreenState extends State<VendorsScreen> {
     if (saved != true || amount <= 0) return;
     try {
       await _db.addCreditTransaction(vendorId: vendorId, type: 'PAYMENT', amount: amount);
-      _load();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -161,73 +134,164 @@ class _VendorsScreenState extends State<VendorsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final totalOutstanding = _balances.values.fold<double>(0, (sum, b) => sum + b);
     return Scaffold(
       appBar: AppBar(title: const Text('Vendor Credit')),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: Theme.of(context).colorScheme.primaryContainer,
-            child: Text('Total Outstanding: ${formatCurrency(totalOutstanding)}',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          Expanded(
-            child: _vendors.isEmpty
-                ? const Center(child: Text('No vendors yet. Tap + to add one.'))
-                : ListView.builder(
-                    itemCount: _vendors.length,
-                    itemBuilder: (_, i) {
-                      final v = _vendors[i];
-                      final balance = _balances[v['id']] ?? 0;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        child: ListTile(
-                          leading: CircleAvatar(child: Text((v['name'] as String)[0].toUpperCase())),
-                          title: Text(v['name'] as String),
-                          subtitle: Text(_vendorSubtitle(v)),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                formatCurrency(balance),
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: balance > 0 ? Colors.red : Colors.green,
-                                ),
-                              ),
-                              if (balance > 0) ...[
-                                const SizedBox(width: 8),
-                                TextButton.icon(
-                                  onPressed: () => _quickCollectPayment(
-                                      v['id'] as String, v['name'] as String),
-                                  icon: const Icon(Icons.payments, size: 16),
-                                  label: const Text('Payment'),
-                                  style: TextButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                                    minimumSize: Size.zero,
-                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (_) => VendorDetailScreen(vendor: v)),
-                            );
-                            _load();
-                          },
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _db.watchVendors(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return ErrorState(message: 'Could not load vendors.\n${snapshot.error}');
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final vendors = snapshot.data!;
+          final totalOutstanding = vendors.fold<double>(
+              0, (sum, v) => sum + ((v['balance'] as num?)?.toDouble() ?? 0));
+          final owingCount = vendors.where((v) => ((v['balance'] as num?)?.toDouble() ?? 0) > 0).length;
+
+          return Column(
+            children: [
+              SummaryBanner(
+                icon: Icons.account_balance_wallet_outlined,
+                label: 'Total Outstanding',
+                value: formatCurrency(totalOutstanding),
+                color: totalOutstanding > 0 ? AppTheme.danger : AppTheme.success,
+                caption: '$owingCount of ${vendors.length} vendors owe money',
+              ),
+              Expanded(
+                child: vendors.isEmpty
+                    ? EmptyState(
+                        icon: Icons.people_outline,
+                        title: 'No credit customers yet',
+                        message: 'Add a vendor to start tracking what they owe.',
+                        action: FilledButton.icon(
+                          onPressed: _addVendor,
+                          icon: const Icon(Icons.person_add, size: 18),
+                          label: const Text('Add Vendor'),
                         ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 90),
+                        itemCount: vendors.length,
+                        itemBuilder: (_, i) {
+                          final v = vendors[i];
+                          final balance = (v['balance'] as num?)?.toDouble() ?? 0;
+                          final owes = balance > 0;
+                          final subtitle = _vendorSubtitle(v);
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: AppCard(
+                              padding: const EdgeInsets.all(14),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => VendorDetailScreen(vendor: v)),
+                              ),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 21,
+                                        backgroundColor:
+                                            (owes ? AppTheme.danger : AppTheme.success).withOpacity(0.12),
+                                        child: Text(
+                                          (v['name'] as String)[0].toUpperCase(),
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 17,
+                                            color: owes ? AppTheme.danger : AppTheme.success,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 13),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(v['name'] as String,
+                                                style: const TextStyle(
+                                                    fontWeight: FontWeight.w600, fontSize: 15)),
+                                            if (subtitle.isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 2),
+                                                child: Text(subtitle,
+                                                    style: TextStyle(
+                                                        fontSize: 12, color: Colors.grey.shade600),
+                                                    overflow: TextOverflow.ellipsis),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text('Outstanding',
+                                              style: TextStyle(
+                                                  fontSize: 10.5, color: Colors.grey.shade600)),
+                                          const SizedBox(height: 1),
+                                          Text(
+                                            formatCurrency(balance),
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 15,
+                                              color: owes ? AppTheme.danger : AppTheme.success,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  if (owes) ...[
+                                    const Divider(height: 22),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton.icon(
+                                            onPressed: () => Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                  builder: (_) => VendorDetailScreen(vendor: v)),
+                                            ),
+                                            icon: const Icon(Icons.menu_book_outlined, size: 16),
+                                            label: const Text('Ledger'),
+                                            style: OutlinedButton.styleFrom(
+                                              padding: const EdgeInsets.symmetric(vertical: 10),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: FilledButton.icon(
+                                            onPressed: () => _quickCollectPayment(
+                                                v['id'] as String, v['name'] as String),
+                                            icon: const Icon(Icons.payments_outlined, size: 16),
+                                            label: const Text('Payment'),
+                                            style: FilledButton.styleFrom(
+                                              padding: const EdgeInsets.symmetric(vertical: 10),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
       ),
-      floatingActionButton: FloatingActionButton(onPressed: _addVendor, child: const Icon(Icons.person_add)),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addVendor,
+        icon: const Icon(Icons.person_add),
+        label: const Text('Add Vendor'),
+      ),
     );
   }
 }
@@ -242,32 +306,6 @@ class VendorDetailScreen extends StatefulWidget {
 
 class _VendorDetailScreenState extends State<VendorDetailScreen> {
   final _db = DBHelper.instance;
-  List<Map<String, dynamic>> _transactions = [];
-  double _balance = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final results = await Future.wait([
-        _db.getVendorTransactions(widget.vendor['id'] as String),
-        _db.getVendorBalance(widget.vendor['id'] as String),
-      ]);
-      setState(() {
-        _transactions = results[0] as List<Map<String, dynamic>>;
-        _balance = results[1] as double;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not load this vendor: $e')));
-      }
-    }
-  }
 
   Future<void> _recordTransaction(String type) async {
     final amountCtrl = TextEditingController();
@@ -332,86 +370,109 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
         notes: notesCtrl.text.trim(),
         date: txnDate.toIso8601String(),
       );
-      _load();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final vendorId = widget.vendor['id'] as String;
     return Scaffold(
       appBar: AppBar(title: Text(widget.vendor['name'] as String)),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: _balance > 0 ? Colors.red.shade50 : Colors.green.shade50,
-            child: Column(
-              children: [
-                if ((widget.vendor['address'] as String?)?.isNotEmpty == true ||
-                    (widget.vendor['phone'] as String?)?.isNotEmpty == true)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      [
-                        if ((widget.vendor['phone'] as String?)?.isNotEmpty == true) widget.vendor['phone'],
-                        if ((widget.vendor['address'] as String?)?.isNotEmpty == true)
-                          'Place: ${widget.vendor['address']}',
-                      ].join('  •  '),
-                      style: const TextStyle(color: Colors.black54, fontSize: 12),
+      body: StreamBuilder<Map<String, dynamic>?>(
+        stream: _db.watchVendor(vendorId),
+        builder: (context, vendorSnap) {
+          // Fall back to the vendor map we were opened with until the
+          // live one arrives, so the screen never looks empty.
+          final vendor = vendorSnap.data ?? widget.vendor;
+          final balance = (vendor['balance'] as num?)?.toDouble() ?? 0;
+
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                color: balance > 0 ? Colors.red.shade50 : Colors.green.shade50,
+                child: Column(
+                  children: [
+                    if ((vendor['address'] as String?)?.isNotEmpty == true ||
+                        (vendor['phone'] as String?)?.isNotEmpty == true)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          [
+                            if ((vendor['phone'] as String?)?.isNotEmpty == true) vendor['phone'],
+                            if ((vendor['address'] as String?)?.isNotEmpty == true)
+                              'Place: ${vendor['address']}',
+                          ].join('  •  '),
+                          style: const TextStyle(color: Colors.black54, fontSize: 12),
+                        ),
+                      ),
+                    const Text('Current Balance'),
+                    Text(
+                      formatCurrency(balance),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: balance > 0 ? Colors.red : Colors.green,
+                      ),
                     ),
-                  ),
-                const Text('Current Balance'),
-                Text(
-                  formatCurrency(_balance),
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: _balance > 0 ? Colors.red : Colors.green,
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _recordTransaction('CREDIT'),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Credit'),
-                  ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _recordTransaction('CREDIT'),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add Credit'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => _recordTransaction('PAYMENT'),
+                        icon: const Icon(Icons.payments),
+                        label: const Text('Collect Payment'),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () => _recordTransaction('PAYMENT'),
-                    icon: const Icon(Icons.payments),
-                    label: const Text('Collect Payment'),
-                  ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Transaction History', style: Theme.of(context).textTheme.titleMedium),
                 ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Transaction History', style: Theme.of(context).textTheme.titleMedium),
-            ),
-          ),
-          Expanded(
-            child: _transactions.isEmpty
-                ? const Center(child: Text('No transactions yet.'))
-                : ListView.builder(
-                    itemCount: _transactions.length,
-                    itemBuilder: (_, i) => _TransactionTile(txn: _transactions[i]),
-                  ),
-          ),
-        ],
+              ),
+              Expanded(
+                child: StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: _db.watchVendorTransactions(vendorId),
+                  builder: (context, txnSnap) {
+                    if (txnSnap.hasError) {
+                      return Center(child: Text('Could not load history: ${txnSnap.error}'));
+                    }
+                    if (!txnSnap.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final transactions = txnSnap.data!;
+                    if (transactions.isEmpty) {
+                      return const Center(child: Text('No transactions yet.'));
+                    }
+                    return ListView.builder(
+                      itemCount: transactions.length,
+                      itemBuilder: (_, i) => _TransactionTile(txn: transactions[i]),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

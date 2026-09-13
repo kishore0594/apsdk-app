@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'utils/app_theme.dart';
+import 'utils/app_logo.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -11,6 +14,15 @@ import 'screens/login_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  // Offline persistence is on by default on Android/iOS, but this makes it
+  // explicit rather than relying on an unstated default — and removes any
+  // cache-size limit, so a store's data (small by any reasonable measure)
+  // is never evicted from the on-device cache to make room, no matter how
+  // long the phone stays offline.
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+  );
   runApp(const ApsdkApp());
 }
 
@@ -19,26 +31,10 @@ class ApsdkApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF1E6F5C);
     return MaterialApp(
       title: 'Madhura Agro Traders',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: primaryColor),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: primaryColor,
-          foregroundColor: Colors.white,
-          elevation: 0,
-        ),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: primaryColor,
-          foregroundColor: Colors.white,
-        ),
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-        ),
-      ),
+      theme: AppTheme.build(),
       home: const AuthGate(),
     );
   }
@@ -56,7 +52,22 @@ class AuthGate extends StatelessWidget {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AppLogo(size: 76),
+                  SizedBox(height: 20),
+                  Text('Madhura Agro Traders',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  SizedBox(height: 20),
+                  SizedBox(
+                      width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.5)),
+                ],
+              ),
+            ),
+          );
         }
         if (snapshot.hasData) {
           return const RootNav();

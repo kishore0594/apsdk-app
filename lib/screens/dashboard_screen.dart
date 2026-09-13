@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
+import '../utils/app_logo.dart';
 import 'sales_screen.dart';
 import 'vendors_screen.dart';
 import 'todays_collections_screen.dart';
@@ -39,10 +41,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _paymentWiseData = [];
   bool _breakdownLoading = true;
 
+  StreamSubscription? _salesChangeSub;
+  StreamSubscription? _creditChangeSub;
+
   @override
   void initState() {
     super.initState();
     _load();
+    // Auto-refresh the whole dashboard the instant a sale or a credit/
+    // payment entry changes — on this phone, or synced in from the other
+    // one. .skip(1) drops the initial snapshot each stream fires
+    // immediately on subscribing, since _load() above already covers that.
+    _salesChangeSub = _db.watchSalesRaw().skip(1).listen((_) => _load());
+    _creditChangeSub = _db.watchCreditTransactionsRaw().skip(1).listen((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _salesChangeSub?.cancel();
+    _creditChangeSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -162,7 +180,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Madhura Agro Traders — Store Overview'),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.18),
+                shape: BoxShape.circle,
+              ),
+              child: const AppLogo(size: 26, withBackground: false),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Madhura Agro Traders',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.1)),
+                  Text('Store overview',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w400, height: 1.4)),
+                ],
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Reports & Trends',
