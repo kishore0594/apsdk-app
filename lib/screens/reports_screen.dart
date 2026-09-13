@@ -12,7 +12,9 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   final _db = DBHelper.instance;
-  String _period = 'Week'; // Week or Month
+  String _period = 'Week'; // Week, Month, Custom
+  DateTime _customStart = DateTime.now().subtract(const Duration(days: 6));
+  DateTime _customEnd = DateTime.now();
   bool _loading = true;
   String? _error;
 
@@ -39,9 +41,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final endExclusive = DateTime(now.year, now.month + 1, 1);
       return (start.toIso8601String(), endExclusive.toIso8601String(), now.day);
     }
+    if (_period == 'Custom') {
+      final start = DateTime(_customStart.year, _customStart.month, _customStart.day);
+      final endExclusive =
+          DateTime(_customEnd.year, _customEnd.month, _customEnd.day).add(const Duration(days: 1));
+      final days = endExclusive.difference(start).inDays;
+      return (start.toIso8601String(), endExclusive.toIso8601String(), days.clamp(1, 366));
+    }
     final start = today.subtract(const Duration(days: 6));
     final endExclusive = today.add(const Duration(days: 1));
     return (start.toIso8601String(), endExclusive.toIso8601String(), 7);
+  }
+
+  Future<void> _pickCustomRange() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialDateRange: DateTimeRange(start: _customStart, end: _customEnd),
+    );
+    if (range != null) {
+      setState(() {
+        _customStart = range.start;
+        _customEnd = range.end;
+        _period = 'Custom';
+      });
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -82,6 +108,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget build(BuildContext context) {
     final (start, end, _) = _rangeAndDays();
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F8F7),
       appBar: AppBar(title: const Text('Reports & Trends')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -108,92 +135,231 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         '${formatDay(start)} → ${formatDay(DateTime.parse(end).subtract(const Duration(days: 1)).toIso8601String())}  ·  $_salesCount sales',
                         style: const TextStyle(fontSize: 12, color: Colors.black54),
                       ),
-                      const SizedBox(height: 12),
-                      SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment(value: 'Week', label: Text('Week')),
-                          ButtonSegment(value: 'Month', label: Text('Month')),
-                        ],
-                        selected: {_period},
-                        onSelectionChanged: (s) {
-                          setState(() => _period = s.first);
-                          _load();
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(child: _metricCard('Revenue', formatCurrency(_revenue), Colors.blue)),
-                          const SizedBox(width: 12),
-                          Expanded(child: _metricCard('Cost', formatCurrency(_cost), Colors.orange)),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       Row(
                         children: [
                           Expanded(
-                              child: _metricCard('Gross Profit', formatCurrency(_profit), Colors.green)),
-                          const SizedBox(width: 12),
+                            child: _PeriodPill(
+                              label: 'Week',
+                              selected: _period == 'Week',
+                              onTap: () {
+                                setState(() => _period = 'Week');
+                                _load();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
                           Expanded(
-                              child: _metricCard('Sales Count', '$_salesCount', Colors.brown)),
+                            child: _PeriodPill(
+                              label: 'Month',
+                              selected: _period == 'Month',
+                              onTap: () {
+                                setState(() => _period = 'Month');
+                                _load();
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _PeriodPill(
+                              label: 'Custom',
+                              selected: _period == 'Custom',
+                              icon: Icons.calendar_month,
+                              onTap: _pickCustomRange,
+                            ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 24),
-                      Text('Revenue over period', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 20),
+                      GridView.count(
+                        crossAxisCount: 2,
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 1.55,
+                        children: [
+                          _MetricCard(
+                              label: 'Revenue',
+                              value: formatCurrency(_revenue),
+                              icon: Icons.trending_up,
+                              color: const Color(0xFF2563EB)),
+                          _MetricCard(
+                              label: 'Cost',
+                              value: formatCurrency(_cost),
+                              icon: Icons.shopping_bag_outlined,
+                              color: const Color(0xFFEA580C)),
+                          _MetricCard(
+                              label: 'Gross Profit',
+                              value: formatCurrency(_profit),
+                              icon: Icons.savings_outlined,
+                              color: const Color(0xFF1E6F5C)),
+                          _MetricCard(
+                              label: 'Sales Count',
+                              value: '$_salesCount',
+                              icon: Icons.receipt_long_outlined,
+                              color: const Color(0xFF7C3AED)),
+                        ],
+                      ),
+                      const SizedBox(height: 28),
+                      _SectionHeader('Revenue over period'),
                       const SizedBox(height: 12),
-                      SizedBox(height: 160, child: _TrendChart(data: _trend)),
-                      const SizedBox(height: 24),
-                      Text('Payment Mix', style: Theme.of(context).textTheme.titleMedium),
+                      _ChartCard(child: SizedBox(height: 170, child: _TrendChart(data: _trend))),
+                      const SizedBox(height: 28),
+                      _SectionHeader('Payment Mix'),
                       const SizedBox(height: 12),
-                      SizedBox(height: 160, child: _PaymentMixChart(data: _paymentMix)),
-                      const SizedBox(height: 24),
-                      Text('Top Products', style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      if (_topProducts.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('No sales in this period.'),
-                        )
-                      else
-                        _RankedList(
-                          items: _topProducts
-                              .map((p) => _RankedItem(p['name'] as String, (p['total'] as num).toDouble()))
-                              .toList(),
-                        ),
-                      const SizedBox(height: 24),
-                      Text('By Category', style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      if (_byCategory.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Text('No sales in this period.'),
-                        )
-                      else
-                        _RankedList(
-                          items: _byCategory
-                              .map((c) => _RankedItem(c['category'] as String, (c['total'] as num).toDouble()))
-                              .toList(),
-                          barColor: Colors.green,
-                        ),
+                      _ChartCard(child: SizedBox(height: 180, child: _PaymentMixChart(data: _paymentMix))),
+                      const SizedBox(height: 28),
+                      _SectionHeader('Top Products'),
+                      const SizedBox(height: 12),
+                      _ChartCard(
+                        child: _topProducts.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Text('No sales in this period.'),
+                              )
+                            : _RankedList(
+                                items: _topProducts
+                                    .map((p) =>
+                                        _RankedItem(p['name'] as String, (p['total'] as num).toDouble()))
+                                    .toList(),
+                                barColor: const Color(0xFF1E6F5C),
+                              ),
+                      ),
+                      const SizedBox(height: 28),
+                      _SectionHeader('By Category'),
+                      const SizedBox(height: 12),
+                      _ChartCard(
+                        child: _byCategory.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Text('No sales in this period.'),
+                              )
+                            : _RankedList(
+                                items: _byCategory
+                                    .map((c) => _RankedItem(
+                                        c['category'] as String, (c['total'] as num).toDouble()))
+                                    .toList(),
+                                barColor: const Color(0xFF7C3AED),
+                              ),
+                      ),
                       const SizedBox(height: 20),
                     ],
                   ),
                 ),
     );
   }
+}
 
-  Widget _metricCard(String label, String value, Color color) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+class _PeriodPill extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final IconData? icon;
+  const _PeriodPill({required this.label, required this.selected, required this.onTap, this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    const primary = Color(0xFF1E6F5C);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? primary : Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? primary : Colors.grey.shade300),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-            const SizedBox(height: 6),
-            Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+            if (icon != null) ...[
+              Icon(icon, size: 15, color: selected ? Colors.white : Colors.black54),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : Colors.black87,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 13,
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader(this.title);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold));
+  }
+}
+
+class _ChartCard extends StatelessWidget {
+  final Widget child;
+  const _ChartCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _MetricCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+  const _MetricCard({required this.label, required this.value, required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const Spacer(),
+          Text(label, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: color),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
     );
   }
@@ -208,40 +374,64 @@ class _RankedItem {
 class _RankedList extends StatelessWidget {
   final List<_RankedItem> items;
   final Color barColor;
-  const _RankedList({required this.items, this.barColor = Colors.deepOrange});
+  const _RankedList({required this.items, this.barColor = const Color(0xFF1E6F5C)});
 
   @override
   Widget build(BuildContext context) {
     final maxValue = items.fold<double>(0, (m, i) => i.value > m ? i.value : m);
     return Column(
-      children: items.map((item) {
-        final fraction = maxValue > 0 ? (item.value / maxValue).clamp(0.0, 1.0) : 0.0;
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(child: Text(item.label, overflow: TextOverflow.ellipsis)),
-                  Text(formatCurrency(item.value), style: const TextStyle(fontWeight: FontWeight.w600)),
-                ],
-              ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  minHeight: 8,
-                  backgroundColor: barColor.withOpacity(0.15),
-                  valueColor: AlwaysStoppedAnimation(barColor),
+      children: [
+        for (var idx = 0; idx < items.length; idx++)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  margin: const EdgeInsets.only(top: 1, right: 10),
+                  decoration: BoxDecoration(
+                    color: barColor.withOpacity(0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text('${idx + 1}',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: barColor)),
+                  ),
                 ),
-              ),
-            ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                              child: Text(items[idx].label,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5))),
+                          Text(formatCurrency(items[idx].value),
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: maxValue > 0 ? (items[idx].value / maxValue).clamp(0.0, 1.0) : 0.0,
+                          minHeight: 7,
+                          backgroundColor: barColor.withOpacity(0.10),
+                          valueColor: AlwaysStoppedAnimation(barColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        );
-      }).toList(),
+      ],
     );
   }
 }
@@ -253,13 +443,19 @@ class _TrendChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return const Center(child: Text('No sales in this period.'));
+    const lineColor = Color(0xFF1E6F5C);
     final spots = <FlSpot>[];
     for (var i = 0; i < data.length; i++) {
       spots.add(FlSpot(i.toDouble(), (data[i]['total'] as num?)?.toDouble() ?? 0));
     }
     return LineChart(
       LineChartData(
-        gridData: const FlGridData(show: false),
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: null,
+          getDrawingHorizontalLine: (_) => FlLine(color: Colors.grey.shade200, strokeWidth: 1),
+        ),
         borderData: FlBorderData(show: false),
         titlesData: FlTitlesData(
           leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -275,8 +471,8 @@ class _TrendChart extends StatelessWidget {
                 final day = data[i]['day'] as String? ?? '';
                 final label = day.length >= 10 ? day.substring(8, 10) : day;
                 return Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(label, style: const TextStyle(fontSize: 10)),
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(label, style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
                 );
               },
             ),
@@ -286,12 +482,21 @@ class _TrendChart extends StatelessWidget {
           LineChartBarData(
             spots: spots,
             isCurved: true,
-            color: Theme.of(context).colorScheme.primary,
-            barWidth: 2.5,
-            dotData: const FlDotData(show: false),
+            curveSmoothness: 0.25,
+            color: lineColor,
+            barWidth: 3,
+            dotData: FlDotData(
+              show: spots.length <= 14,
+              getDotPainter: (spot, percent, bar, index) =>
+                  FlDotCirclePainter(radius: 3, color: lineColor, strokeWidth: 2, strokeColor: Colors.white),
+            ),
             belowBarData: BarAreaData(
               show: true,
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [lineColor.withOpacity(0.22), lineColor.withOpacity(0.0)],
+              ),
             ),
           ),
         ],
@@ -306,6 +511,11 @@ class _PaymentMixChart extends StatelessWidget {
 
   static const _labels = {'CASH': 'Cash', 'CREDIT': 'Full Credit', 'PARTIAL': 'Partial Credit'};
   static const _order = ['CASH', 'PARTIAL', 'CREDIT'];
+  static const _colors = {
+    'CASH': Color(0xFF16A34A),
+    'PARTIAL': Color(0xFFD97706),
+    'CREDIT': Color(0xFFDC2626),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -318,34 +528,61 @@ class _PaymentMixChart extends StatelessWidget {
     for (var i = 0; i < _order.length; i++) {
       final value = totalsByType[_order[i]] ?? 0;
       bars.add(BarChartGroupData(x: i, barRods: [
-        BarChartRodData(toY: value, color: Theme.of(context).colorScheme.primary, width: 28),
+        BarChartRodData(
+          toY: value,
+          color: _colors[_order[i]],
+          width: 32,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+        ),
       ]));
     }
-    return BarChart(
-      BarChartData(
-        maxY: maxValue == 0 ? 1 : maxValue * 1.2,
-        barGroups: bars,
-        gridData: const FlGridData(show: false),
-        borderData: FlBorderData(show: false),
-        titlesData: FlTitlesData(
-          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final i = value.toInt();
-                if (i < 0 || i >= _order.length) return const SizedBox.shrink();
-                return Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(_labels[_order[i]] ?? '', style: const TextStyle(fontSize: 10)),
-                );
-              },
+    return Column(
+      children: [
+        Expanded(
+          child: BarChart(
+            BarChartData(
+              maxY: maxValue == 0 ? 1 : maxValue * 1.25,
+              barGroups: bars,
+              gridData: const FlGridData(show: false),
+              borderData: FlBorderData(show: false),
+              titlesData: FlTitlesData(
+                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) {
+                      final i = value.toInt();
+                      if (i < 0 || i >= _order.length) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(_labels[_order[i]] ?? '',
+                            style: TextStyle(fontSize: 10.5, color: Colors.grey.shade700)),
+                      );
+                    },
+                  ),
+                ),
+              ),
             ),
           ),
         ),
-      ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 14,
+          children: _order.map((key) {
+            final value = totalsByType[key] ?? 0;
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(width: 9, height: 9, decoration: BoxDecoration(color: _colors[key], shape: BoxShape.circle)),
+                const SizedBox(width: 5),
+                Text(formatCurrency(value), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+              ],
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 }
