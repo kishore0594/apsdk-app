@@ -21,15 +21,23 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   }
 
   Future<void> _load() async {
-    final suppliers = await _db.getSuppliers();
-    final balances = <String, double>{};
-    for (final s in suppliers) {
-      balances[s['id'] as String] = await _db.getSupplierBalance(s['id'] as String);
+    try {
+      final suppliers = await _db.getSuppliers();
+      // getSuppliers() already includes each supplier's balance field —
+      // same optimization as vendors, avoids a query per supplier.
+      final balances = <String, double>{
+        for (final s in suppliers) s['id'] as String: (s['balance'] as num?)?.toDouble() ?? 0
+      };
+      setState(() {
+        _suppliers = suppliers;
+        _balances = balances;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not load suppliers: $e')));
+      }
     }
-    setState(() {
-      _suppliers = suppliers;
-      _balances = balances;
-    });
   }
 
   Future<void> _addSupplier() async {
@@ -148,12 +156,21 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   }
 
   Future<void> _load() async {
-    final txns = await _db.getSupplierTransactions(widget.supplier['id'] as String);
-    final balance = await _db.getSupplierBalance(widget.supplier['id'] as String);
-    setState(() {
-      _transactions = txns;
-      _balance = balance;
-    });
+    try {
+      final results = await Future.wait([
+        _db.getSupplierTransactions(widget.supplier['id'] as String),
+        _db.getSupplierBalance(widget.supplier['id'] as String),
+      ]);
+      setState(() {
+        _transactions = results[0] as List<Map<String, dynamic>>;
+        _balance = results[1] as double;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not load this supplier: $e')));
+      }
+    }
   }
 
   Future<void> _recordPayment() async {

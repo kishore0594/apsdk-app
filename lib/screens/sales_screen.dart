@@ -43,15 +43,19 @@ class _SalesScreenState extends State<SalesScreen> {
 
   Future<void> _load() async {
     final filter = _todayOnly ? DateTime.now().toIso8601String().substring(0, 10) : null;
-    final sales = await _db.getSales(dateFilter: filter);
-    final trend = await _db.getSalesSummaryByDay(days: 30);
+    // Run both queries at once instead of one after another — cuts the
+    // wait roughly in half.
+    final results = await Future.wait([
+      _db.getSales(dateFilter: filter),
+      _db.getSalesSummaryByDay(days: 30),
+    ]);
     setState(() {
-      _sales = sales;
-      _monthlyTrend = trend.reversed.toList();
+      _sales = results[0];
+      _monthlyTrend = results[1].reversed.toList();
     });
   }
 
-  Future<void> _cancelSale(String saleId) async {
+  Future<void> _cancelSale(String saleId, {bool closeSheet = true}) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -70,12 +74,21 @@ class _SalesScreenState extends State<SalesScreen> {
       ),
     );
     if (confirm != true) return;
-    await _db.cancelSale(saleId);
-    if (mounted) Navigator.pop(context); // close the sale detail sheet
+    try {
+      await _db.cancelSale(saleId);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not cancel sale: $e')));
+      }
+      return;
+    }
+    if (closeSheet && mounted) Navigator.pop(context); // close the sale detail sheet
     _load();
   }
 
-  Future<void> _modifySale(Map<String, dynamic> sale, List<Map<String, dynamic>> items) async {
+  Future<void> _modifySale(Map<String, dynamic> sale, List<Map<String, dynamic>> items,
+      {bool closeSheet = true}) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -90,10 +103,18 @@ class _SalesScreenState extends State<SalesScreen> {
       ),
     );
     if (confirm != true) return;
-    await _db.cancelSale(sale['id'] as String);
-    if (mounted) Navigator.pop(context); // close the sale detail sheet
+    try {
+      await _db.cancelSale(sale['id'] as String);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not modify sale: $e')));
+      }
+      return;
+    }
+    if (closeSheet && mounted) Navigator.pop(context); // close the sale detail sheet
     if (!mounted) return;
-    final result = await Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => NewSaleScreen(
@@ -102,15 +123,45 @@ class _SalesScreenState extends State<SalesScreen> {
           prefillPaymentType: sale['payment_type'] as String? ?? 'CASH',
           prefillVendorId: sale['vendor_id'] as String?,
           prefillPaidAmount: (sale['paid_amount'] as num?)?.toDouble() ?? 0,
+          prefillDate: sale['date'] as String?,
         ),
       ),
     );
-    if (result == true) {
-      _load();
-    } else {
-      // Even if they backed out of the re-entry, the original was already
-      // cancelled, so the list still needs refreshing.
-      _load();
+    // Reload regardless of the re-entry result — the original sale was
+    // already cancelled either way, so the list is stale until refreshed.
+    _load();
+  }
+
+  /// Long-press quick menu: Modify / Delete without needing to open the
+  /// full sale detail view first.
+  Future<void> _showSaleActions(Map<String, dynamic> sale) async {
+    if (sale['status'] == 'cancelled') return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text('Modify'),
+              onTap: () => Navigator.pop(context, 'modify'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('Delete (Cancel Sale)', style: TextStyle(color: Colors.red)),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'modify') {
+      final items = await _db.getSaleItems(sale['id'] as String);
+      if (mounted) _modifySale(sale, items, closeSheet: false);
+    } else if (action == 'delete') {
+      _cancelSale(sale['id'] as String, closeSheet: false);
     }
   }
 
@@ -272,6 +323,7 @@ class _SalesScreenState extends State<SalesScreen> {
                           ),
                           trailing: Text(s['payment_type'] as String),
                           onTap: () => _viewSale(s),
+                          onLongPress: () => _showSaleActions(s),
                         ),
                       );
                     },
@@ -297,6 +349,7 @@ class NewSaleScreen extends StatefulWidget {
   final String? prefillPaymentType;
   final String? prefillVendorId;
   final double? prefillPaidAmount;
+  final String? prefillDate;
 
   const NewSaleScreen({
     super.key,
@@ -305,6 +358,7 @@ class NewSaleScreen extends StatefulWidget {
     this.prefillPaymentType,
     this.prefillVendorId,
     this.prefillPaidAmount,
+    this.prefillDate,
   });
 
   @override
@@ -325,6 +379,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
 
   String _paymentType = 'CASH';
   String? _vendorId;
+  DateTime _saleDate = DateTime.now();
   TextEditingController? _pickerController;
   final _discountCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
@@ -378,6 +433,10 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
       }
       if (widget.prefillPaidAmount != null) {
         _paidCtrl.text = widget.prefillPaidAmount!.toStringAsFixed(2);
+      }
+      if (widget.prefillDate != null) {
+        final parsed = DateTime.tryParse(widget.prefillDate!);
+        if (parsed != null) _saleDate = parsed;
       }
     });
   }
@@ -481,20 +540,29 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     }
     final paid = _paymentType == 'CASH' ? _total : (double.tryParse(_paidCtrl.text) ?? 0);
 
-    await _db.createSale(
-      items: _cart
-          .map((l) => {
-                'product_id': l.product['id'],
-                'product_name': l.product['name'],
-                'quantity': l.quantity,
-                'unit_price': l.product['selling_price'],
-              })
-          .toList(),
-      discount: _discount,
-      paymentType: _paymentType,
-      vendorId: _vendorId,
-      paidAmount: paid,
-    );
+    try {
+      await _db.createSale(
+        items: _cart
+            .map((l) => {
+                  'product_id': l.product['id'],
+                  'product_name': l.product['name'],
+                  'quantity': l.quantity,
+                  'unit_price': l.product['selling_price'],
+                })
+            .toList(),
+        discount: _discount,
+        paymentType: _paymentType,
+        vendorId: _vendorId,
+        paidAmount: paid,
+        saleDate: _saleDate.toIso8601String(),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not save sale: $e')));
+      }
+      return;
+    }
 
     if (mounted) Navigator.pop(context, true);
   }
@@ -515,55 +583,79 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-            child: LayoutBuilder(
-              builder: (context, constraints) => Autocomplete<Map<String, dynamic>>(
-                displayStringForOption: (p) => p['name'] as String,
-                optionsBuilder: (value) {
-                  if (value.text.trim().isEmpty) return const Iterable<Map<String, dynamic>>.empty();
-                  final q = value.text.toLowerCase();
-                  return _products.where((p) => (p['name'] as String).toLowerCase().contains(q));
-                },
-                onSelected: (p) {
-                  _addProduct(p);
-                  _pickerController?.clear();
-                },
-                fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-                  _pickerController = controller;
-                  return TextField(
-                    controller: controller,
-                    focusNode: focusNode,
-                    decoration: const InputDecoration(
-                      labelText: 'Type a product name to search',
-                      prefixIcon: Icon(Icons.search),
-                    ),
-                  );
-                },
-                optionsViewBuilder: (context, onSelected, options) => Align(
-                  alignment: Alignment.topLeft,
-                  child: Material(
-                    elevation: 4,
-                    borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(
-                      width: constraints.maxWidth,
-                      height: options.length > 4 ? 260 : options.length * 64.0,
-                      child: ListView.builder(
-                        padding: EdgeInsets.zero,
-                        itemCount: options.length,
-                        itemBuilder: (context, i) {
-                          final p = options.elementAt(i);
-                          return ListTile(
-                            dense: true,
-                            title: Text(p['name'] as String),
-                            subtitle: Text(
-                                '${formatCurrency(p['selling_price'])}/${p['unit']} • stock ${p['quantity']}'),
-                            onTap: () => onSelected(p),
-                          );
-                        },
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => Autocomplete<Map<String, dynamic>>(
+                      displayStringForOption: (p) => p['name'] as String,
+                      optionsBuilder: (value) {
+                        if (value.text.trim().isEmpty) return const Iterable<Map<String, dynamic>>.empty();
+                        final q = value.text.toLowerCase();
+                        return _products.where((p) => (p['name'] as String).toLowerCase().contains(q));
+                      },
+                      onSelected: (p) {
+                        _addProduct(p);
+                        _pickerController?.clear();
+                      },
+                      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                        _pickerController = controller;
+                        return TextField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          decoration: const InputDecoration(
+                            labelText: 'Type a product name to search',
+                            prefixIcon: Icon(Icons.search),
+                          ),
+                        );
+                      },
+                      optionsViewBuilder: (context, onSelected, options) => Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4,
+                          borderRadius: BorderRadius.circular(8),
+                          child: SizedBox(
+                            width: constraints.maxWidth,
+                            height: options.length > 4 ? 260 : options.length * 64.0,
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              itemCount: options.length,
+                              itemBuilder: (context, i) {
+                                final p = options.elementAt(i);
+                                return ListTile(
+                                  dense: true,
+                                  title: Text(p['name'] as String),
+                                  subtitle: Text(
+                                      '${formatCurrency(p['selling_price'])}/${p['unit']} • stock ${p['quantity']}'),
+                                  onTap: () => onSelected(p),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _saleDate,
+                        firstDate: DateTime(2015),
+                        lastDate: DateTime.now(),
+                      );
+                      if (picked != null) setState(() => _saleDate = picked);
+                    },
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text(formatDay(_saleDate.toIso8601String())),
+                  ),
+                ),
+              ],
             ),
           ),
           const Divider(height: 16),

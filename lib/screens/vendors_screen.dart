@@ -21,15 +21,24 @@ class _VendorsScreenState extends State<VendorsScreen> {
   }
 
   Future<void> _load() async {
-    final vendors = await _db.getVendors();
-    final balances = <String, double>{};
-    for (final v in vendors) {
-      balances[v['id'] as String] = await _db.getVendorBalance(v['id'] as String);
+    try {
+      final vendors = await _db.getVendors();
+      // getVendors() already includes each vendor's balance field — no
+      // need for a separate query per vendor (that loop was the real
+      // cause of the multi-second delay after any change).
+      final balances = <String, double>{
+        for (final v in vendors) v['id'] as String: (v['balance'] as num?)?.toDouble() ?? 0
+      };
+      setState(() {
+        _vendors = vendors;
+        _balances = balances;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not load vendors: $e')));
+      }
     }
-    setState(() {
-      _vendors = vendors;
-      _balances = balances;
-    });
   }
 
   String _vendorSubtitle(Map<String, dynamic> v) {
@@ -193,12 +202,21 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   }
 
   Future<void> _load() async {
-    final txns = await _db.getVendorTransactions(widget.vendor['id'] as String);
-    final balance = await _db.getVendorBalance(widget.vendor['id'] as String);
-    setState(() {
-      _transactions = txns;
-      _balance = balance;
-    });
+    try {
+      final results = await Future.wait([
+        _db.getVendorTransactions(widget.vendor['id'] as String),
+        _db.getVendorBalance(widget.vendor['id'] as String),
+      ]);
+      setState(() {
+        _transactions = results[0] as List<Map<String, dynamic>>;
+        _balance = results[1] as double;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not load this vendor: $e')));
+      }
+    }
   }
 
   Future<void> _recordTransaction(String type) async {

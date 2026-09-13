@@ -25,6 +25,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _agingVendors = [];
   List<Map<String, dynamic>> _weeklySales = [];
   bool _loading = true;
+  String? _error;
 
   // Sales breakdown (pie charts) state
   String _period = 'Daily'; // Daily, Weekly, Monthly, Custom
@@ -41,27 +42,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final sales = await _db.getTodaysSalesTotal();
-    final collections = await _db.getTodaysCollections();
-    final collectionsTotal = collections.fold<double>(
-        0, (sum, c) => sum + (c['amount'] as num).toDouble());
-    final outstanding = await _db.getTotalOutstandingCredit();
-    final lowStock = await _db.getLowStockProducts();
-    final agingVendors = await _db.getAgingVendors(minDays: 60);
-    final weekly = await _db.getSalesSummaryByDay(days: 7);
-
     setState(() {
-      _todaysSales = sales;
-      _todaysCollections = collectionsTotal;
-      _outstandingCredit = outstanding;
-      _lowStock = lowStock;
-      _agingVendors = agingVendors;
-      _weeklySales = weekly.reversed.toList();
-      _loading = false;
+      _loading = true;
+      _error = null;
     });
+    try {
+      // Run every independent query at once instead of one after another —
+      // this is what made the Dashboard feel slow, since these used to
+      // wait on each other in sequence.
+      final results = await Future.wait([
+        _db.getTodaysSalesTotal(),
+        _db.getTodaysCollections(),
+        _db.getTotalOutstandingCredit(),
+        _db.getLowStockProducts(),
+        _db.getAgingVendors(minDays: 60),
+        _db.getSalesSummaryByDay(days: 7),
+      ]);
+      final collections = results[1] as List<Map<String, dynamic>>;
+      final collectionsTotal =
+          collections.fold<double>(0, (sum, c) => sum + (c['amount'] as num).toDouble());
 
-    await _loadBreakdown();
+      setState(() {
+        _todaysSales = results[0] as double;
+        _todaysCollections = collectionsTotal;
+        _outstandingCredit = results[2] as double;
+        _lowStock = results[3] as List<Map<String, dynamic>>;
+        _agingVendors = results[4] as List<Map<String, dynamic>>;
+        _weeklySales = (results[5] as List<Map<String, dynamic>>).reversed.toList();
+        _loading = false;
+      });
+
+      await _loadBreakdown();
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = 'Could not load dashboard: $e';
+      });
+    }
   }
 
   /// Returns the start/endExclusive ISO8601 range for the current
@@ -95,14 +112,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadBreakdown() async {
     setState(() => _breakdownLoading = true);
-    final (start, end) = _periodRange();
-    final products = await _db.getProductWiseSales(startIso: start, endIsoExclusive: end);
-    final payments = await _db.getPaymentTypeWiseSales(startIso: start, endIsoExclusive: end);
-    setState(() {
-      _productWiseData = products;
-      _paymentWiseData = payments;
-      _breakdownLoading = false;
-    });
+    try {
+      final (start, end) = _periodRange();
+      final results = await Future.wait([
+        _db.getProductWiseSales(startIso: start, endIsoExclusive: end),
+        _db.getPaymentTypeWiseSales(startIso: start, endIsoExclusive: end),
+      ]);
+      setState(() {
+        _productWiseData = results[0];
+        _paymentWiseData = results[1];
+        _breakdownLoading = false;
+      });
+    } catch (e) {
+      setState(() => _breakdownLoading = false);
+    }
   }
 
   Future<void> _pickCustomRange() async {
@@ -159,7 +182,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red, size: 40),
+                        const SizedBox(height: 12),
+                        Text(_error!, textAlign: TextAlign.center),
+                        const SizedBox(height: 16),
+                        FilledButton(onPressed: _load, child: const Text('Retry')),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.all(16),

@@ -125,11 +125,13 @@ class DBHelper {
   }
 
   Future<List<Map<String, dynamic>>> getStockHistory(String productId) async {
-    final snap = await _stockMovements
-        .where('product_id', isEqualTo: productId)
-        .orderBy('date', descending: true)
-        .get();
-    return _fromSnapshot(snap);
+    // No orderBy in the query itself — combining a where() with orderBy()
+    // on a different field needs a Firestore composite index, which isn't
+    // set up. Sorting the (small) result client-side avoids needing one.
+    final snap = await _stockMovements.where('product_id', isEqualTo: productId).get();
+    final list = _fromSnapshot(snap);
+    list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+    return list;
   }
 
   // ---------------- SUPPLIERS ----------------
@@ -184,11 +186,11 @@ class DBHelper {
   }
 
   Future<List<Map<String, dynamic>>> getSupplierTransactions(String supplierId) async {
-    final snap = await _supplierTxns
-        .where('supplier_id', isEqualTo: supplierId)
-        .orderBy('date', descending: true)
-        .get();
-    return _fromSnapshot(snap);
+    // Sorted client-side — see getStockHistory for why.
+    final snap = await _supplierTxns.where('supplier_id', isEqualTo: supplierId).get();
+    final list = _fromSnapshot(snap);
+    list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+    return list;
   }
 
   /// Records a stock purchase made up of specific products, quantities and
@@ -338,22 +340,25 @@ class DBHelper {
   }
 
   Future<List<Map<String, dynamic>>> getVendorTransactions(String vendorId) async {
-    final snap = await _creditTxns
-        .where('vendor_id', isEqualTo: vendorId)
-        .orderBy('date', descending: true)
-        .get();
-    return _fromSnapshot(snap);
+    // Sorted client-side — see getStockHistory for why.
+    final snap = await _creditTxns.where('vendor_id', isEqualTo: vendorId).get();
+    final list = _fromSnapshot(snap);
+    list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+    return list;
   }
 
   Future<List<Map<String, dynamic>>> getTodaysCollections() async {
     final todayPrefix = DateTime.now().toIso8601String().substring(0, 10);
+    // Filters only by date range here (needs no composite index, same as
+    // getSales) and filters type == PAYMENT client-side afterward, rather
+    // than combining an equality filter with a range filter in the query.
     final snap = await _creditTxns
-        .where('type', isEqualTo: 'PAYMENT')
         .where('date', isGreaterThanOrEqualTo: todayPrefix)
         .where('date', isLessThan: '$todayPrefix\uf8ff')
-        .orderBy('date', descending: true)
         .get();
-    return _fromSnapshot(snap);
+    final list = _fromSnapshot(snap).where((t) => t['type'] == 'PAYMENT').toList();
+    list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+    return list;
   }
 
   Future<double> getTotalOutstandingCredit() async {
@@ -376,16 +381,16 @@ class DBHelper {
     final vendorDoc = await _vendors.doc(vendorId).get();
     if (!vendorDoc.exists) return null;
 
-    final snap = await _creditTxns
-        .where('vendor_id', isEqualTo: vendorId)
-        .orderBy('date')
-        .get();
+    // Sorted client-side (ascending, oldest first) — see getStockHistory
+    // for why the query itself has no orderBy.
+    final snap = await _creditTxns.where('vendor_id', isEqualTo: vendorId).get();
+    final txns = _fromSnapshot(snap);
+    txns.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
     double runningBalance = 0;
     DateTime? openedSince;
 
-    for (final doc in snap.docs) {
-      final t = doc.data() as Map<String, dynamic>;
+    for (final t in txns) {
       final amount = (t['amount'] as num).toDouble();
       runningBalance = t['type'] == 'CREDIT' ? runningBalance + amount : runningBalance - amount;
       if (runningBalance <= 0) {
@@ -431,12 +436,13 @@ class DBHelper {
     String? vendorId,
     required double paidAmount,
     String? notes,
+    String? saleDate,
   }) async {
     final subtotal = items.fold<double>(
         0, (sum, item) => sum + (item['quantity'] as num) * (item['unit_price'] as num));
     final total = subtotal - discount;
     final saleRef = _sales.doc();
-    final now = DateTime.now().toIso8601String();
+    final now = saleDate ?? DateTime.now().toIso8601String();
 
     await _fs.runTransaction((txn) async {
       // ---- reads first ----
