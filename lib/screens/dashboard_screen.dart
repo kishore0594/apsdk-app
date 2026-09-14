@@ -5,6 +5,9 @@ import 'dart:async';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_logo.dart';
+import '../utils/app_theme.dart';
+import '../utils/locale_controller.dart';
+import '../utils/app_strings.dart';
 import 'sales_screen.dart';
 import 'vendors_screen.dart';
 import 'todays_collections_screen.dart';
@@ -141,6 +144,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return (start.toIso8601String(), endExclusive.toIso8601String());
   }
 
+  Future<void> _pickLanguage() async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(AppStrings.t('select_language')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(AppStrings.t('english')),
+              trailing: LocaleController.instance.language == 'en'
+                  ? const Icon(Icons.check, color: AppTheme.primary)
+                  : null,
+              onTap: () => Navigator.pop(context, 'en'),
+            ),
+            ListTile(
+              title: Text(AppStrings.t('tamil')),
+              trailing: LocaleController.instance.language == 'ta'
+                  ? const Icon(Icons.check, color: AppTheme.primary)
+                  : null,
+              onTap: () => Navigator.pop(context, 'ta'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice != null) {
+      await LocaleController.instance.setLanguage(choice);
+    }
+  }
+
   Future<void> _loadBreakdown() async {
     setState(() => _breakdownLoading = true);
     try {
@@ -184,21 +218,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             const AppLogo(size: 32, withBackground: false),
             const SizedBox(width: 10),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Madhura Agro Traders',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.1)),
-                  Text('Store overview',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w400, height: 1.4)),
+                  Text(AppStrings.t('app_name'),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, height: 1.1)),
+                  Text(AppStrings.t('store_overview'),
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w400, height: 1.4)),
                 ],
               ),
             ),
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: AppStrings.t('language'),
+            icon: const Icon(Icons.language),
+            onPressed: _pickLanguage,
+          ),
           IconButton(
             tooltip: 'Reports & Trends',
             icon: const Icon(Icons.bar_chart),
@@ -212,18 +251,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 context, MaterialPageRoute(builder: (_) => const DataSyncScreen())),
           ),
           IconButton(
-            tooltip: 'Sign out',
+            tooltip: AppStrings.t('sign_out'),
             icon: const Icon(Icons.logout),
             onPressed: () async {
               final confirm = await showDialog<bool>(
                 context: context,
                 builder: (_) => AlertDialog(
-                  title: const Text('Sign out?'),
+                  title: Text(AppStrings.t('sign_out_confirm')),
                   actions: [
                     TextButton(
-                        onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                        onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
                     FilledButton(
-                        onPressed: () => Navigator.pop(context, true), child: const Text('Sign out')),
+                        onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('sign_out'))),
                   ],
                 ),
               );
@@ -261,7 +300,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       Expanded(
                         child: _StatCard(
-                          label: "Today's Sales",
+                          label: AppStrings.t('todays_sales'),
                           value: formatCurrency(_todaysSales),
                           icon: Icons.point_of_sale,
                           color: Colors.green,
@@ -272,7 +311,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _StatCard(
-                          label: "Today's Collections",
+                          label: AppStrings.t('todays_collections'),
                           value: formatCurrency(_todaysCollections),
                           icon: Icons.payments,
                           color: Colors.blue,
@@ -284,7 +323,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 12),
                   _StatCard(
-                    label: 'Total Outstanding Credit',
+                    label: AppStrings.t('total_outstanding_credit'),
                     value: formatCurrency(_outstandingCredit),
                     icon: Icons.receipt_long,
                     color: Colors.orange,
@@ -297,7 +336,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       Expanded(
                         child: _StatCard(
-                          label: "Today's Gross Profit",
+                          label: AppStrings.t('todays_gross_profit'),
                           value: formatCurrency(_todaysGrossProfit),
                           icon: Icons.trending_up,
                           color: Colors.teal,
@@ -308,7 +347,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _StatCard(
-                          label: 'Supplier Dues',
+                          label: AppStrings.t('supplier_dues'),
                           value: formatCurrency(_supplierDues),
                           icon: Icons.local_shipping,
                           color: Colors.brown,
@@ -376,7 +415,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 24),
                   Row(
                     children: [
-                      Text('Low Stock Alerts', style: Theme.of(context).textTheme.titleMedium),
+                      Text(AppStrings.t('low_stock_alerts'), style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(width: 8),
                       if (_lowStock.isNotEmpty)
                         Container(
@@ -408,7 +447,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 24),
                   Row(
                     children: [
-                      Text('Outstanding Vendors (60+ days)', style: Theme.of(context).textTheme.titleMedium),
+                      Text(AppStrings.t('outstanding_vendors'), style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(width: 8),
                       if (_agingVendors.isNotEmpty)
                         Container(

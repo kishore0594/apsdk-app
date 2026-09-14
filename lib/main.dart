@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'utils/app_theme.dart';
 import 'utils/app_logo.dart';
+import 'utils/locale_controller.dart';
+import 'utils/app_strings.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -23,6 +25,7 @@ Future<void> main() async {
     persistenceEnabled: true,
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
+  await LocaleController.instance.load();
   runApp(const ApsdkApp());
 }
 
@@ -31,11 +34,17 @@ class ApsdkApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Madhura Agro Traders',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.build(),
-      home: const AuthGate(),
+    // Rebuilds the whole app whenever the language changes, anywhere.
+    return ListenableBuilder(
+      listenable: LocaleController.instance,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Madhura Agro Traders',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.build(),
+          home: const AuthGate(),
+        );
+      },
     );
   }
 }
@@ -103,12 +112,27 @@ class _RootNavState extends State<RootNav> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.point_of_sale_outlined), selectedIcon: Icon(Icons.point_of_sale), label: 'Sales'),
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'Inventory'),
-          NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: 'Credit'),
-          NavigationDestination(icon: Icon(Icons.local_shipping_outlined), selectedIcon: Icon(Icons.local_shipping), label: 'Suppliers'),
+        destinations: [
+          NavigationDestination(
+              icon: const Icon(Icons.dashboard_outlined),
+              selectedIcon: const Icon(Icons.dashboard),
+              label: AppStrings.t('nav_home')),
+          NavigationDestination(
+              icon: const Icon(Icons.point_of_sale_outlined),
+              selectedIcon: const Icon(Icons.point_of_sale),
+              label: AppStrings.t('nav_sales')),
+          NavigationDestination(
+              icon: const Icon(Icons.inventory_2_outlined),
+              selectedIcon: const Icon(Icons.inventory_2),
+              label: AppStrings.t('nav_inventory')),
+          NavigationDestination(
+              icon: const Icon(Icons.people_outline),
+              selectedIcon: const Icon(Icons.people),
+              label: AppStrings.t('nav_credit')),
+          NavigationDestination(
+              icon: const Icon(Icons.local_shipping_outlined),
+              selectedIcon: const Icon(Icons.local_shipping),
+              label: AppStrings.t('nav_suppliers')),
         ],
       ),
     );

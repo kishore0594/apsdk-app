@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_logo.dart';
+import '../utils/locale_controller.dart';
+import '../utils/app_strings.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -78,19 +80,28 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: const AppLogo(size: 84),
                     ),
                     const SizedBox(height: 18),
-                    const Text(
-                      'Madhura Agro Traders',
+                    Text(
+                      AppStrings.t('app_name'),
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                           fontSize: 23, fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      'Store management',
+                      AppStrings.t('store_management'),
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.8)),
                     ),
-                    const SizedBox(height: 30),
+                    const SizedBox(height: 14),
+                    TextButton.icon(
+                      onPressed: _pickLanguage,
+                      icon: const Icon(Icons.language, size: 16, color: Colors.white),
+                      label: Text(
+                        LocaleController.instance.isTamil ? 'தமிழ் ▾' : 'English ▾',
+                        style: const TextStyle(color: Colors.white, fontSize: 12.5),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     Container(
                       padding: const EdgeInsets.all(22),
                       decoration: BoxDecoration(
@@ -108,15 +119,15 @@ class _LoginScreenState extends State<LoginScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('Sign in',
-                              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                          Text(AppStrings.t('sign_in'),
+                              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 18),
                           TextField(
                             controller: _emailCtrl,
                             keyboardType: TextInputType.emailAddress,
-                            decoration: const InputDecoration(
-                              labelText: 'Email',
-                              prefixIcon: Icon(Icons.email_outlined),
+                            decoration: InputDecoration(
+                              labelText: AppStrings.t('email'),
+                              prefixIcon: const Icon(Icons.email_outlined),
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -125,7 +136,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             obscureText: _obscure,
                             onSubmitted: (_) => _signIn(),
                             decoration: InputDecoration(
-                              labelText: 'Password',
+                              labelText: AppStrings.t('password'),
                               prefixIcon: const Icon(Icons.lock_outline),
                               suffixIcon: IconButton(
                                 icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility,
@@ -165,7 +176,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2, color: Colors.white))
                                 : const Icon(Icons.login, size: 18),
-                            label: Text(_loading ? 'Signing in…' : 'Sign In'),
+                            label: Text(_loading ? AppStrings.t('signing_in') : AppStrings.t('sign_in')),
                           ),
                         ],
                       ),
@@ -178,5 +189,37 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _pickLanguage() async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(AppStrings.t('select_language')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(AppStrings.t('english')),
+              trailing: LocaleController.instance.language == 'en'
+                  ? const Icon(Icons.check, color: AppTheme.primary)
+                  : null,
+              onTap: () => Navigator.pop(context, 'en'),
+            ),
+            ListTile(
+              title: Text(AppStrings.t('tamil')),
+              trailing: LocaleController.instance.language == 'ta'
+                  ? const Icon(Icons.check, color: AppTheme.primary)
+                  : null,
+              onTap: () => Navigator.pop(context, 'ta'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice != null) {
+      await LocaleController.instance.setLanguage(choice);
+      if (mounted) setState(() {});
+    }
   }
 }
