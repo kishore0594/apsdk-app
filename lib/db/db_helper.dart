@@ -91,6 +91,19 @@ class DBHelper {
     return products;
   }
 
+  /// Live version of getProducts — see watchVendors for why this exists:
+  /// updates automatically, including a pending write made while offline.
+  Stream<List<Map<String, dynamic>>> watchProducts({String? search}) {
+    return _products.orderBy('name').snapshots().map((snap) {
+      var products = _fromSnapshot(snap);
+      if (search != null && search.isNotEmpty) {
+        final q = search.toLowerCase();
+        products = products.where((p) => (p['name'] as String).toLowerCase().contains(q)).toList();
+      }
+      return products;
+    });
+  }
+
   Future<List<Map<String, dynamic>>> getLowStockProducts() async {
     final snap = await _products.get();
     final products = _fromSnapshot(snap);
@@ -449,6 +462,22 @@ class DBHelper {
     return list;
   }
 
+  /// Live version of getTodaysCollections — collections happen throughout
+  /// the day from either phone, so this screen benefits from the same
+  /// auto-update-without-refresh treatment as the other list screens.
+  Stream<List<Map<String, dynamic>>> watchTodaysCollections() {
+    final todayPrefix = DateTime.now().toIso8601String().substring(0, 10);
+    return _creditTxns
+        .where('date', isGreaterThanOrEqualTo: todayPrefix)
+        .where('date', isLessThan: '$todayPrefix\uf8ff')
+        .snapshots()
+        .map((snap) {
+      final list = _fromSnapshot(snap).where((t) => t['type'] == 'PAYMENT').toList();
+      list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+      return list;
+    });
+  }
+
   Future<double> getTotalOutstandingCredit() async {
     final snap = await _vendors.get();
     double total = 0;
@@ -508,6 +537,47 @@ class DBHelper {
     }
     aging.sort((a, b) => (b['days_outstanding'] as int).compareTo(a['days_outstanding'] as int));
     return aging;
+  }
+
+  /// Every vendor, enriched with purchase count, last purchase date, and
+  /// (for anyone with a balance) how many days it's been outstanding —
+  /// one combined dataset the Vendor Insights screen then sorts/groups
+  /// different ways (by location, frequency, balance, or how overdue).
+  /// A one-time fetch, not a live stream — this is a considered analysis
+  /// view a store owner opens deliberately, not a running list, same
+  /// reasoning as Reports & Trends.
+  Future<List<Map<String, dynamic>>> getVendorAnalytics() async {
+    final vendors = await getVendors();
+    final salesSnap = await _sales.get();
+
+    final purchaseCount = <String, int>{};
+    final lastPurchase = <String, String>{};
+    for (final doc in salesSnap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['status'] == 'cancelled') continue;
+      final vid = data['vendor_id'] as String?;
+      final date = data['date'] as String?;
+      if (vid == null || date == null) continue;
+      purchaseCount[vid] = (purchaseCount[vid] ?? 0) + 1;
+      if (lastPurchase[vid] == null || date.compareTo(lastPurchase[vid]!) > 0) {
+        lastPurchase[vid] = date;
+      }
+    }
+
+    final result = <Map<String, dynamic>>[];
+    for (final v in vendors) {
+      final vid = v['id'] as String;
+      final balance = (v['balance'] as num?)?.toDouble() ?? 0;
+      final daysOutstanding = balance > 0 ? await getVendorOutstandingDays(vid) : null;
+      result.add({
+        ...v,
+        'balance': balance,
+        'purchase_count': purchaseCount[vid] ?? 0,
+        'last_purchase_date': lastPurchase[vid],
+        'days_outstanding': daysOutstanding,
+      });
+    }
+    return result;
   }
 
   // ---------------- SALES ----------------

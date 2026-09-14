@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
+import 'vendor_insights_screen.dart';
 
 class VendorsScreen extends StatefulWidget {
   const VendorsScreen({super.key});
@@ -207,7 +208,17 @@ class _VendorsScreenState extends State<VendorsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Vendor Credit')),
+      appBar: AppBar(
+        title: const Text('Vendor Credit'),
+        actions: [
+          IconButton(
+            tooltip: 'Vendor Insights',
+            icon: const Icon(Icons.insights_outlined),
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => const VendorInsightsScreen())),
+          ),
+        ],
+      ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _db.watchVendors(),
         builder: (context, snapshot) {
