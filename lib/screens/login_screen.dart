@@ -68,12 +68,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
                         shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                              color: Colors.black.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 6)),
+                        ],
                       ),
-                      child: const AppLogo(size: 66),
+                      child: const AppLogo(size: 84),
                     ),
                     const SizedBox(height: 18),
                     const Text(

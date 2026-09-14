@@ -182,14 +182,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
-                shape: BoxShape.circle,
-              ),
-              child: const AppLogo(size: 26, withBackground: false),
-            ),
+            const AppLogo(size: 32, withBackground: false),
             const SizedBox(width: 10),
             const Expanded(
               child: Column(

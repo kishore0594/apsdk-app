@@ -9,10 +9,22 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 ///   so date-range filtering stays simple string comparison, same as the
 ///   original SQLite version.
 /// - Vendor/supplier running balances and product stock quantities are
-///   stored directly as fields on their own document ("denormalized") and
-///   kept in sync inside Firestore transactions whenever a related
-///   transaction is written. This means displaying a vendor's balance is a
-///   single cheap document read, not a replay of their whole history.
+///   stored directly as fields on their own document ("denormalized") so
+///   displaying a balance is a single cheap document read, not a replay
+///   of their whole history.
+/// - Money/stock-affecting writes (a sale, a payment, a purchase) read the
+///   relevant documents first, then commit everything as a single
+///   WriteBatch — deliberately NOT a Firestore transaction
+///   (runTransaction), because transactions require a live connection to
+///   the server even to queue up, and fail outright while offline. A
+///   WriteBatch, like a plain set()/update(), queues normally in the
+///   local cache and syncs whenever a connection is available — which is
+///   what lets every screen keep working indefinitely with no internet at
+///   all. The trade-off: if both phones happen to edit the exact same
+///   vendor/product at the exact same instant while both online, the
+///   last write wins rather than one being rejected — an acceptable
+///   trade for a small store where that's rare, against "must work
+///   offline" which matters every day.
 /// - Firestore has no JOIN, so a few fields that used to come from a SQL
 ///   join (vendor_name on a credit transaction, product_name on a stock
 ///   movement, etc.) are instead written directly onto the document at
@@ -93,8 +105,8 @@ class DBHelper {
 
   /// Adjusts a product's stock and logs the movement. deltaQty is positive
   /// for stock IN (purchase, correction) or negative for stock OUT (sale).
-  /// Uses a transaction so concurrent sales on two phones can't both read
-  /// the same starting quantity and silently overwrite each other.
+  /// Reads then writes via a WriteBatch (not a transaction) so this works
+  /// fully offline — see the class doc comment for why.
   Future<void> adjustStock({
     required String productId,
     required double deltaQty,
@@ -102,26 +114,25 @@ class DBHelper {
     String? notes,
   }) async {
     final productRef = _products.doc(productId);
-    await _fs.runTransaction((txn) async {
-      final snap = await txn.get(productRef);
-      if (!snap.exists) return;
-      final data = snap.data() as Map<String, dynamic>;
-      final current = (data['quantity'] as num?)?.toDouble() ?? 0;
-      final updated = current + deltaQty;
-      txn.update(productRef, {
-        'quantity': updated,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-      txn.set(_stockMovements.doc(), {
-        'product_id': productId,
-        'product_name': data['name'],
-        'date': DateTime.now().toIso8601String(),
-        'type': deltaQty >= 0 ? 'IN' : 'OUT',
-        'quantity': deltaQty.abs(),
-        'reason': reason,
-        'notes': notes,
-      });
+    final snap = await productRef.get();
+    if (!snap.exists) return;
+    final data = snap.data() as Map<String, dynamic>;
+    final current = (data['quantity'] as num?)?.toDouble() ?? 0;
+    final updated = current + deltaQty;
+    final now = DateTime.now().toIso8601String();
+
+    final batch = _fs.batch();
+    batch.update(productRef, {'quantity': updated, 'updated_at': now});
+    batch.set(_stockMovements.doc(), {
+      'product_id': productId,
+      'product_name': data['name'],
+      'date': now,
+      'type': deltaQty >= 0 ? 'IN' : 'OUT',
+      'quantity': deltaQty.abs(),
+      'reason': reason,
+      'notes': notes,
     });
+    await batch.commit();
   }
 
   Future<List<Map<String, dynamic>>> getStockHistory(String productId) async {
@@ -150,6 +161,42 @@ class DBHelper {
     return _fromSnapshot(snap);
   }
 
+  /// Live version of getSuppliers — updates automatically whenever the
+  /// data changes, including a pending write made while offline (a
+  /// one-time get() can miss that until the device reconnects; a
+  /// snapshots() stream reflects the local cache immediately).
+  Stream<List<Map<String, dynamic>>> watchSuppliers() {
+    return _suppliers.orderBy('name').snapshots().map(_fromSnapshot);
+  }
+
+  Stream<Map<String, dynamic>?> watchSupplier(String supplierId) {
+    return _suppliers.doc(supplierId).snapshots().map((doc) => doc.exists ? _withId(doc) : null);
+  }
+
+  Stream<List<Map<String, dynamic>>> watchSupplierTransactions(String supplierId) {
+    return _supplierTxns.where('supplier_id', isEqualTo: supplierId).snapshots().map((snap) {
+      final list = _fromSnapshot(snap);
+      list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+      return list;
+    });
+  }
+
+  /// Edits a supplier's own profile fields — never touches their balance.
+  Future<void> updateSupplier(String supplierId, {String? name, String? phone, String? address}) async {
+    await _suppliers.doc(supplierId).update({
+      if (name != null) 'name': name,
+      if (name != null) 'name_lower': name.toLowerCase(),
+      if (phone != null) 'phone': phone,
+      if (address != null) 'address': address,
+    });
+  }
+
+  /// Deletes a supplier profile — see deleteVendor for the same
+  /// keep-the-audit-trail reasoning.
+  Future<void> deleteSupplier(String supplierId) async {
+    await _suppliers.doc(supplierId).delete();
+  }
+
   Future<double> getSupplierBalance(String supplierId) async {
     final doc = await _suppliers.doc(supplierId).get();
     if (!doc.exists) return 0;
@@ -159,30 +206,33 @@ class DBHelper {
 
   /// Records a purchase (increases what the store owes) or a payment
   /// (decreases what the store owes), keeping the supplier's balance field
-  /// in sync inside a transaction.
+  /// in sync. Reads then writes via a WriteBatch (not a transaction) so
+  /// this works fully offline — see the class doc comment for why.
   Future<void> addSupplierTransaction({
     required String supplierId,
     required String type, // PURCHASE or PAYMENT
     required double amount,
     String? notes,
+    String? date,
   }) async {
     final supplierRef = _suppliers.doc(supplierId);
-    await _fs.runTransaction((txn) async {
-      final snap = await txn.get(supplierRef);
-      final data = snap.data() as Map<String, dynamic>? ?? {};
-      final current = (data['balance'] as num?)?.toDouble() ?? 0;
-      final newBalance = type == 'PURCHASE' ? current + amount : current - amount;
-      txn.set(_supplierTxns.doc(), {
-        'supplier_id': supplierId,
-        'supplier_name': data['name'],
-        'date': DateTime.now().toIso8601String(),
-        'type': type,
-        'amount': amount,
-        'balance_after': newBalance,
-        'notes': notes,
-      });
-      txn.update(supplierRef, {'balance': newBalance});
+    final snap = await supplierRef.get();
+    final data = snap.data() as Map<String, dynamic>? ?? {};
+    final current = (data['balance'] as num?)?.toDouble() ?? 0;
+    final newBalance = type == 'PURCHASE' ? current + amount : current - amount;
+
+    final batch = _fs.batch();
+    batch.set(_supplierTxns.doc(), {
+      'supplier_id': supplierId,
+      'supplier_name': data['name'],
+      'date': date ?? DateTime.now().toIso8601String(),
+      'type': type,
+      'amount': amount,
+      'balance_after': newBalance,
+      'notes': notes,
     });
+    batch.update(supplierRef, {'balance': newBalance});
+    await batch.commit();
   }
 
   Future<List<Map<String, dynamic>>> getSupplierTransactions(String supplierId) async {
@@ -194,11 +244,11 @@ class DBHelper {
   }
 
   /// Records a stock purchase made up of specific products, quantities and
-  /// costs. Reads the supplier and every referenced product first (a
-  /// Firestore transaction requires all reads before any writes), then
-  /// atomically writes the purchase record, its line items, the updated
-  /// supplier balance, each product's new stock/cost, and stock movement
-  /// logs.
+  /// costs. Reads the supplier and every referenced product first, then
+  /// writes the purchase record, its line items, the updated supplier
+  /// balance, each product's new stock/cost, and stock movement logs, all
+  /// via a single WriteBatch (not a transaction) so this works fully
+  /// offline — see the class doc comment for why.
   Future<String> addSupplierPurchase({
     required String supplierId,
     required List<Map<String, dynamic>> items, // product_id, product_name, quantity, unit_cost
@@ -208,70 +258,71 @@ class DBHelper {
     final txnRef = _supplierTxns.doc();
     final amount = items.fold<double>(
         0, (sum, i) => sum + (i['quantity'] as num) * (i['unit_cost'] as num));
+    final now = DateTime.now().toIso8601String();
 
-    await _fs.runTransaction((txn) async {
-      final supplierSnap = await txn.get(supplierRef);
-      final supplierData = supplierSnap.data() as Map<String, dynamic>? ?? {};
-      final currentBalance = (supplierData['balance'] as num?)?.toDouble() ?? 0;
-      final newBalance = currentBalance + amount;
+    final supplierSnap = await supplierRef.get();
+    final supplierData = supplierSnap.data() as Map<String, dynamic>? ?? {};
+    final currentBalance = (supplierData['balance'] as num?)?.toDouble() ?? 0;
+    final newBalance = currentBalance + amount;
 
-      // Read every referenced product before writing anything.
-      final productRefs = <String, DocumentReference>{};
-      final productData = <String, Map<String, dynamic>>{};
-      for (final item in items) {
-        final pid = item['product_id'] as String?;
-        if (pid == null || productRefs.containsKey(pid)) continue;
-        final ref = _products.doc(pid);
-        final snap = await txn.get(ref);
-        if (snap.exists) {
-          productRefs[pid] = ref;
-          productData[pid] = snap.data() as Map<String, dynamic>;
-        }
+    // Read every referenced product before writing anything.
+    final productRefs = <String, DocumentReference>{};
+    final productData = <String, Map<String, dynamic>>{};
+    for (final item in items) {
+      final pid = item['product_id'] as String?;
+      if (pid == null || productRefs.containsKey(pid)) continue;
+      final ref = _products.doc(pid);
+      final snap = await ref.get();
+      if (snap.exists) {
+        productRefs[pid] = ref;
+        productData[pid] = snap.data() as Map<String, dynamic>;
       }
+    }
 
-      txn.set(txnRef, {
-        'supplier_id': supplierId,
-        'supplier_name': supplierData['name'],
-        'date': DateTime.now().toIso8601String(),
-        'type': 'PURCHASE',
-        'amount': amount,
-        'balance_after': newBalance,
-        'notes': notes,
-      });
-      txn.update(supplierRef, {'balance': newBalance});
-
-      for (final item in items) {
-        final qty = (item['quantity'] as num).toDouble();
-        final cost = (item['unit_cost'] as num).toDouble();
-        txn.set(_supplierPurchaseItems.doc(), {
-          'supplier_transaction_id': txnRef.id,
-          'product_id': item['product_id'],
-          'product_name': item['product_name'],
-          'quantity': qty,
-          'unit_cost': cost,
-          'subtotal': qty * cost,
-        });
-
-        final pid = item['product_id'] as String?;
-        if (pid != null && productRefs.containsKey(pid)) {
-          final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
-          txn.update(productRefs[pid]!, {
-            'quantity': current + qty,
-            'cost_price': cost,
-            'updated_at': DateTime.now().toIso8601String(),
-          });
-          txn.set(_stockMovements.doc(), {
-            'product_id': pid,
-            'product_name': item['product_name'],
-            'date': DateTime.now().toIso8601String(),
-            'type': 'IN',
-            'quantity': qty,
-            'reason': 'PURCHASE',
-            'notes': 'Purchase #${txnRef.id}',
-          });
-        }
-      }
+    final batch = _fs.batch();
+    batch.set(txnRef, {
+      'supplier_id': supplierId,
+      'supplier_name': supplierData['name'],
+      'date': now,
+      'type': 'PURCHASE',
+      'amount': amount,
+      'balance_after': newBalance,
+      'notes': notes,
     });
+    batch.update(supplierRef, {'balance': newBalance});
+
+    for (final item in items) {
+      final qty = (item['quantity'] as num).toDouble();
+      final cost = (item['unit_cost'] as num).toDouble();
+      batch.set(_supplierPurchaseItems.doc(), {
+        'supplier_transaction_id': txnRef.id,
+        'product_id': item['product_id'],
+        'product_name': item['product_name'],
+        'quantity': qty,
+        'unit_cost': cost,
+        'subtotal': qty * cost,
+      });
+
+      final pid = item['product_id'] as String?;
+      if (pid != null && productRefs.containsKey(pid)) {
+        final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
+        batch.update(productRefs[pid]!, {
+          'quantity': current + qty,
+          'cost_price': cost,
+          'updated_at': now,
+        });
+        batch.set(_stockMovements.doc(), {
+          'product_id': pid,
+          'product_name': item['product_name'],
+          'date': now,
+          'type': 'IN',
+          'quantity': qty,
+          'reason': 'PURCHASE',
+          'notes': 'Purchase #${txnRef.id}',
+        });
+      }
+    }
+    await batch.commit();
 
     return txnRef.id;
   }
@@ -299,6 +350,42 @@ class DBHelper {
     return _fromSnapshot(snap);
   }
 
+  /// Live version of getVendors — see watchSuppliers for why this exists.
+  Stream<List<Map<String, dynamic>>> watchVendors() {
+    return _vendors.orderBy('name').snapshots().map(_fromSnapshot);
+  }
+
+  Stream<Map<String, dynamic>?> watchVendor(String vendorId) {
+    return _vendors.doc(vendorId).snapshots().map((doc) => doc.exists ? _withId(doc) : null);
+  }
+
+  Stream<List<Map<String, dynamic>>> watchVendorTransactions(String vendorId) {
+    return _creditTxns.where('vendor_id', isEqualTo: vendorId).snapshots().map((snap) {
+      final list = _fromSnapshot(snap);
+      list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+      return list;
+    });
+  }
+
+  /// Edits a vendor's own profile fields — never touches their balance,
+  /// so it can't be used (accidentally or otherwise) to alter what's owed.
+  Future<void> updateVendor(String vendorId, {String? name, String? phone, String? address}) async {
+    await _vendors.doc(vendorId).update({
+      if (name != null) 'name': name,
+      if (name != null) 'name_lower': name.toLowerCase(),
+      if (phone != null) 'phone': phone,
+      if (address != null) 'address': address,
+    });
+  }
+
+  /// Deletes a vendor profile. Their past credit_transactions rows are
+  /// left as-is (same "keep the audit trail" approach used for cancelled
+  /// sales) — they'll just no longer resolve to a vendor name in the app,
+  /// though they still show in a data export.
+  Future<void> deleteVendor(String vendorId) async {
+    await _vendors.doc(vendorId).delete();
+  }
+
   Future<double> getVendorBalance(String vendorId) async {
     final doc = await _vendors.doc(vendorId).get();
     if (!doc.exists) return 0;
@@ -307,10 +394,10 @@ class DBHelper {
   }
 
   /// Records credit given (sale on credit) or a payment/collection from a
-  /// vendor, keeping the vendor's balance field in sync inside a
-  /// transaction so two phones recording collections at the same time
-  /// can't clobber each other. Pass [date] to backdate an entry (e.g.
-  /// entering old credit history) — defaults to now if omitted.
+  /// vendor, keeping the vendor's balance field in sync. Reads then writes
+  /// via a WriteBatch (not a transaction) so this works fully offline —
+  /// see the class doc comment for why. Pass [date] to backdate an entry
+  /// (e.g. entering old credit history) — defaults to now if omitted.
   Future<void> addCreditTransaction({
     required String vendorId,
     required String type, // CREDIT or PAYMENT
@@ -320,23 +407,24 @@ class DBHelper {
     String? date,
   }) async {
     final vendorRef = _vendors.doc(vendorId);
-    await _fs.runTransaction((txn) async {
-      final snap = await txn.get(vendorRef);
-      final data = snap.data() as Map<String, dynamic>? ?? {};
-      final current = (data['balance'] as num?)?.toDouble() ?? 0;
-      final newBalance = type == 'CREDIT' ? current + amount : current - amount;
-      txn.set(_creditTxns.doc(), {
-        'vendor_id': vendorId,
-        'vendor_name': data['name'],
-        'date': date ?? DateTime.now().toIso8601String(),
-        'type': type,
-        'amount': amount,
-        'balance_after': newBalance,
-        'notes': notes,
-        'sale_id': saleId,
-      });
-      txn.update(vendorRef, {'balance': newBalance});
+    final snap = await vendorRef.get();
+    final data = snap.data() as Map<String, dynamic>? ?? {};
+    final current = (data['balance'] as num?)?.toDouble() ?? 0;
+    final newBalance = type == 'CREDIT' ? current + amount : current - amount;
+
+    final batch = _fs.batch();
+    batch.set(_creditTxns.doc(), {
+      'vendor_id': vendorId,
+      'vendor_name': data['name'],
+      'date': date ?? DateTime.now().toIso8601String(),
+      'type': type,
+      'amount': amount,
+      'balance_after': newBalance,
+      'notes': notes,
+      'sale_id': saleId,
     });
+    batch.update(vendorRef, {'balance': newBalance});
+    await batch.commit();
   }
 
   Future<List<Map<String, dynamic>>> getVendorTransactions(String vendorId) async {
@@ -425,10 +513,10 @@ class DBHelper {
   // ---------------- SALES ----------------
 
   /// Creates a sale with its line items, deducts stock for each item, and
-  /// — if sold on credit — records the credit against the vendor, all in
-  /// one Firestore transaction. Every product and (if relevant) the vendor
-  /// are read first, since a transaction must finish all its reads before
-  /// any of its writes.
+  /// — if sold on credit — records the credit against the vendor. Every
+  /// product and (if relevant) the vendor are read first, then everything
+  /// is written via a single WriteBatch (not a transaction) so this works
+  /// fully offline — see the class doc comment for why.
   Future<String> createSale({
     required List<Map<String, dynamic>> items, // product_id, product_name, quantity, unit_price
     required double discount,
@@ -445,111 +533,111 @@ class DBHelper {
     final saleRef = _sales.doc();
     final now = saleDate ?? DateTime.now().toIso8601String();
 
-    await _fs.runTransaction((txn) async {
-      // ---- reads first ----
-      final productRefs = <String, DocumentReference>{};
-      final productData = <String, Map<String, dynamic>>{};
-      for (final item in items) {
-        final pid = item['product_id'] as String?;
-        if (pid == null || productRefs.containsKey(pid)) continue;
-        final ref = _products.doc(pid);
-        final snap = await txn.get(ref);
-        if (snap.exists) {
-          productRefs[pid] = ref;
-          productData[pid] = snap.data() as Map<String, dynamic>;
-        }
+    // ---- reads first ----
+    final productRefs = <String, DocumentReference>{};
+    final productData = <String, Map<String, dynamic>>{};
+    for (final item in items) {
+      final pid = item['product_id'] as String?;
+      if (pid == null || productRefs.containsKey(pid)) continue;
+      final ref = _products.doc(pid);
+      final snap = await ref.get();
+      if (snap.exists) {
+        productRefs[pid] = ref;
+        productData[pid] = snap.data() as Map<String, dynamic>;
       }
+    }
 
-      DocumentReference? vendorRef;
-      Map<String, dynamic>? vendorData;
-      double vendorCurrentBalance = 0;
-      if (vendorId != null) {
-        vendorRef = _vendors.doc(vendorId);
-        final snap = await txn.get(vendorRef);
-        vendorData = snap.data() as Map<String, dynamic>? ?? {};
-        vendorCurrentBalance = (vendorData['balance'] as num?)?.toDouble() ?? 0;
-      }
+    DocumentReference? vendorRef;
+    Map<String, dynamic>? vendorData;
+    double vendorCurrentBalance = 0;
+    if (vendorId != null) {
+      vendorRef = _vendors.doc(vendorId);
+      final snap = await vendorRef.get();
+      vendorData = snap.data() as Map<String, dynamic>? ?? {};
+      vendorCurrentBalance = (vendorData['balance'] as num?)?.toDouble() ?? 0;
+    }
 
-      // ---- writes ----
-      txn.set(saleRef, {
-        'date': now,
-        'subtotal': subtotal,
-        'discount': discount,
-        'total_amount': total,
-        'payment_type': paymentType,
-        'vendor_id': vendorId,
-        'vendor_name': vendorData?['name'],
-        'paid_amount': paidAmount,
-        'notes': notes,
-        'status': 'confirmed',
-        'due_date': dueDate,
-      });
-
-      for (final item in items) {
-        final qty = (item['quantity'] as num).toDouble();
-        final price = (item['unit_price'] as num).toDouble();
-        final pid = item['product_id'] as String?;
-        // Snapshot cost + category at time of sale (not just now, in case
-        // the product's price/category changes later) — feeds the Gross
-        // Profit and By-Category numbers on Reports & Trends.
-        final unitCost = (pid != null && productData.containsKey(pid))
-            ? (productData[pid]!['cost_price'] as num?)?.toDouble() ?? 0
-            : 0.0;
-        final category = (pid != null && productData.containsKey(pid))
-            ? (productData[pid]!['category'] as String? ?? '')
-            : '';
-        txn.set(_saleItems.doc(), {
-          'sale_id': saleRef.id,
-          'sale_date': now,
-          'product_id': item['product_id'],
-          'product_name': item['product_name'],
-          'quantity': qty,
-          'unit_price': price,
-          'subtotal': qty * price,
-          'unit_cost': unitCost,
-          'category': category,
-          'status': 'confirmed',
-        });
-
-        if (pid != null && productRefs.containsKey(pid)) {
-          final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
-          txn.update(productRefs[pid]!, {
-            'quantity': current - qty,
-            'updated_at': now,
-          });
-          txn.set(_stockMovements.doc(), {
-            'product_id': pid,
-            'product_name': item['product_name'],
-            'date': now,
-            'type': 'OUT',
-            'quantity': qty,
-            'reason': 'SALE',
-            'notes': 'Sale #${saleRef.id}',
-          });
-        }
-      }
-
-      if ((paymentType == 'CREDIT' || paymentType == 'PARTIAL') &&
-          vendorId != null &&
-          vendorRef != null) {
-        final creditAmount = total - paidAmount;
-        if (creditAmount > 0) {
-          final newBalance = vendorCurrentBalance + creditAmount;
-          txn.set(_creditTxns.doc(), {
-            'vendor_id': vendorId,
-            'vendor_name': vendorData?['name'],
-            'date': now,
-            'type': 'CREDIT',
-            'amount': creditAmount,
-            'balance_after': newBalance,
-            'notes': 'Credit sale #${saleRef.id}',
-            'sale_id': saleRef.id,
-          });
-          txn.update(vendorRef, {'balance': newBalance});
-        }
-      }
+    // ---- writes ----
+    final batch = _fs.batch();
+    batch.set(saleRef, {
+      'date': now,
+      'subtotal': subtotal,
+      'discount': discount,
+      'total_amount': total,
+      'payment_type': paymentType,
+      'vendor_id': vendorId,
+      'vendor_name': vendorData?['name'],
+      'paid_amount': paidAmount,
+      'notes': notes,
+      'status': 'confirmed',
+      'due_date': dueDate,
     });
 
+    for (final item in items) {
+      final qty = (item['quantity'] as num).toDouble();
+      final price = (item['unit_price'] as num).toDouble();
+      final pid = item['product_id'] as String?;
+      // Snapshot cost + category at time of sale (not just now, in case
+      // the product's price/category changes later) — feeds the Gross
+      // Profit and By-Category numbers on Reports & Trends.
+      final unitCost = (pid != null && productData.containsKey(pid))
+          ? (productData[pid]!['cost_price'] as num?)?.toDouble() ?? 0
+          : 0.0;
+      final category = (pid != null && productData.containsKey(pid))
+          ? (productData[pid]!['category'] as String? ?? '')
+          : '';
+      batch.set(_saleItems.doc(), {
+        'sale_id': saleRef.id,
+        'sale_date': now,
+        'product_id': item['product_id'],
+        'product_name': item['product_name'],
+        'quantity': qty,
+        'unit_price': price,
+        'subtotal': qty * price,
+        'unit_cost': unitCost,
+        'category': category,
+        'status': 'confirmed',
+      });
+
+      if (pid != null && productRefs.containsKey(pid)) {
+        final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
+        batch.update(productRefs[pid]!, {
+          'quantity': current - qty,
+          'updated_at': now,
+        });
+        batch.set(_stockMovements.doc(), {
+          'product_id': pid,
+          'product_name': item['product_name'],
+          'date': now,
+          'type': 'OUT',
+          'quantity': qty,
+          'reason': 'SALE',
+          'notes': 'Sale #${saleRef.id}',
+        });
+      }
+    }
+
+    if ((paymentType == 'CREDIT' || paymentType == 'PARTIAL') &&
+        vendorId != null &&
+        vendorRef != null) {
+      final creditAmount = total - paidAmount;
+      if (creditAmount > 0) {
+        final newBalance = vendorCurrentBalance + creditAmount;
+        batch.set(_creditTxns.doc(), {
+          'vendor_id': vendorId,
+          'vendor_name': vendorData?['name'],
+          'date': now,
+          'type': 'CREDIT',
+          'amount': creditAmount,
+          'balance_after': newBalance,
+          'notes': 'Credit sale #${saleRef.id}',
+          'sale_id': saleRef.id,
+        });
+        batch.update(vendorRef, {'balance': newBalance});
+      }
+    }
+
+    await batch.commit();
     return saleRef.id;
   }
 
@@ -559,10 +647,10 @@ class DBHelper {
   /// still a full audit trail of what happened. Safe to call even if
   /// items/vendor were since deleted — those parts are just skipped.
   ///
-  /// The sale document and its line items are read as plain queries
-  /// first (Firestore transactions can only re-read specific document
-  /// references, not run new queries), then everything is reversed
-  /// atomically in one transaction.
+  /// Reads the sale, its line items, the vendor, and every referenced
+  /// product first, then writes every reversal via a single WriteBatch
+  /// (not a transaction) so this works fully offline — see the class doc
+  /// comment for why.
   Future<void> cancelSale(String saleId) async {
     final saleDoc = await _sales.doc(saleId).get();
     if (!saleDoc.exists) return;
@@ -574,79 +662,80 @@ class DBHelper {
     final vendorId = saleData['vendor_id'] as String?;
     final now = DateTime.now().toIso8601String();
 
-    await _fs.runTransaction((txn) async {
-      // ---- reads first ----
-      final saleRef = _sales.doc(saleId);
-      final productRefs = <String, DocumentReference>{};
-      final productData = <String, Map<String, dynamic>>{};
-      for (final doc in itemsSnap.docs) {
-        final item = doc.data() as Map<String, dynamic>;
-        final pid = item['product_id'] as String?;
-        if (pid == null || productRefs.containsKey(pid)) continue;
-        final ref = _products.doc(pid);
-        final snap = await txn.get(ref);
-        if (snap.exists) {
-          productRefs[pid] = ref;
-          productData[pid] = snap.data() as Map<String, dynamic>;
-        }
+    // ---- reads first ----
+    final saleRef = _sales.doc(saleId);
+    final productRefs = <String, DocumentReference>{};
+    final productData = <String, Map<String, dynamic>>{};
+    for (final doc in itemsSnap.docs) {
+      final item = doc.data() as Map<String, dynamic>;
+      final pid = item['product_id'] as String?;
+      if (pid == null || productRefs.containsKey(pid)) continue;
+      final ref = _products.doc(pid);
+      final snap = await ref.get();
+      if (snap.exists) {
+        productRefs[pid] = ref;
+        productData[pid] = snap.data() as Map<String, dynamic>;
       }
+    }
 
-      DocumentReference? vendorRef;
-      Map<String, dynamic>? vendorData;
-      if (vendorId != null) {
-        vendorRef = _vendors.doc(vendorId);
-        final snap = await txn.get(vendorRef);
-        if (snap.exists) vendorData = snap.data() as Map<String, dynamic>;
-      }
+    DocumentReference? vendorRef;
+    Map<String, dynamic>? vendorData;
+    if (vendorId != null) {
+      vendorRef = _vendors.doc(vendorId);
+      final snap = await vendorRef.get();
+      if (snap.exists) vendorData = snap.data() as Map<String, dynamic>;
+    }
 
-      // ---- writes ----
-      txn.update(saleRef, {'status': 'cancelled', 'cancelled_at': now});
+    // ---- writes ----
+    final batch = _fs.batch();
+    batch.update(saleRef, {'status': 'cancelled', 'cancelled_at': now});
 
-      for (final doc in itemsSnap.docs) {
-        final item = doc.data() as Map<String, dynamic>;
-        txn.update(doc.reference, {'status': 'cancelled'});
+    for (final doc in itemsSnap.docs) {
+      final item = doc.data() as Map<String, dynamic>;
+      batch.update(doc.reference, {'status': 'cancelled'});
 
-        final pid = item['product_id'] as String?;
-        final qty = (item['quantity'] as num).toDouble();
-        if (pid != null && productRefs.containsKey(pid)) {
-          final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
-          txn.update(productRefs[pid]!, {
-            'quantity': current + qty,
-            'updated_at': now,
-          });
-          txn.set(_stockMovements.doc(), {
-            'product_id': pid,
-            'product_name': item['product_name'],
-            'date': now,
-            'type': 'IN',
-            'quantity': qty,
-            'reason': 'SALE_CANCELLED',
-            'notes': 'Reversal for cancelled sale #$saleId',
-          });
-        }
-      }
-
-      // If this sale had posted credit to a vendor, reverse just that
-      // amount (a balance-reducing entry, same as a payment, but tagged
-      // as an adjustment so it doesn't show up in "today's collections").
-      if (creditSnap.docs.isNotEmpty && vendorRef != null && vendorData != null) {
-        final creditData = creditSnap.docs.first.data() as Map<String, dynamic>;
-        final creditAmount = (creditData['amount'] as num).toDouble();
-        final currentBalance = (vendorData['balance'] as num?)?.toDouble() ?? 0;
-        final newBalance = currentBalance - creditAmount;
-        txn.update(vendorRef, {'balance': newBalance});
-        txn.set(_creditTxns.doc(), {
-          'vendor_id': vendorId,
-          'vendor_name': vendorData['name'],
+      final pid = item['product_id'] as String?;
+      final qty = (item['quantity'] as num).toDouble();
+      if (pid != null && productRefs.containsKey(pid)) {
+        final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
+        batch.update(productRefs[pid]!, {
+          'quantity': current + qty,
+          'updated_at': now,
+        });
+        batch.set(_stockMovements.doc(), {
+          'product_id': pid,
+          'product_name': item['product_name'],
           'date': now,
-          'type': 'ADJUSTMENT',
-          'amount': creditAmount,
-          'balance_after': newBalance,
+          'type': 'IN',
+          'quantity': qty,
+          'reason': 'SALE_CANCELLED',
           'notes': 'Reversal for cancelled sale #$saleId',
-          'sale_id': saleId,
         });
       }
-    });
+    }
+
+    // If this sale had posted credit to a vendor, reverse just that
+    // amount (a balance-reducing entry, same as a payment, but tagged
+    // as an adjustment so it doesn't show up in "today's collections").
+    if (creditSnap.docs.isNotEmpty && vendorRef != null && vendorData != null) {
+      final creditData = creditSnap.docs.first.data() as Map<String, dynamic>;
+      final creditAmount = (creditData['amount'] as num).toDouble();
+      final currentBalance = (vendorData['balance'] as num?)?.toDouble() ?? 0;
+      final newBalance = currentBalance - creditAmount;
+      batch.update(vendorRef, {'balance': newBalance});
+      batch.set(_creditTxns.doc(), {
+        'vendor_id': vendorId,
+        'vendor_name': vendorData['name'],
+        'date': now,
+        'type': 'ADJUSTMENT',
+        'amount': creditAmount,
+        'balance_after': newBalance,
+        'notes': 'Reversal for cancelled sale #$saleId',
+        'sale_id': saleId,
+      });
+    }
+
+    await batch.commit();
   }
 
   Future<List<Map<String, dynamic>>> getSales({String? dateFilter}) async {
@@ -660,6 +749,25 @@ class DBHelper {
     final snap = await query.get();
     return _fromSnapshot(snap);
   }
+
+  /// Live version of getSales — see watchSuppliers for why this exists.
+  Stream<List<Map<String, dynamic>>> watchSales({String? dateFilter}) {
+    Query query = _sales.orderBy('date', descending: true);
+    if (dateFilter != null) {
+      query = _sales
+          .where('date', isGreaterThanOrEqualTo: dateFilter)
+          .where('date', isLessThan: '$dateFilter\uf8ff')
+          .orderBy('date', descending: true);
+    }
+    return query.snapshots().map(_fromSnapshot);
+  }
+
+  /// Raw change streams (not mapped to our usual list shape) purely so the
+  /// Dashboard can listen for "something changed" and refresh its
+  /// aggregates automatically — without needing every individual metric
+  /// on the Dashboard rebuilt as its own stream.
+  Stream<QuerySnapshot> watchSalesRaw() => _sales.snapshots();
+  Stream<QuerySnapshot> watchCreditTransactionsRaw() => _creditTxns.snapshots();
 
   Future<List<Map<String, dynamic>>> getSaleItems(String saleId) async {
     final snap = await _saleItems.where('sale_id', isEqualTo: saleId).get();
@@ -938,5 +1046,112 @@ class DBHelper {
       });
       return false;
     }
+  }
+
+  // ---------------- IMPORT: CREDIT / PURCHASE HISTORY ----------------
+  // Unlike sales, a credit or payment entry has no stock side effect —
+  // it's just a balance adjustment. That makes it safe to import in bulk,
+  // as long as each row is replayed through the same addCreditTransaction/
+  // addSupplierTransaction used everywhere else in the app (so the
+  // balance field stays correctly in sync), rather than writing rows
+  // directly. Rows are sorted by date before replaying them, so each
+  // entry's running balance snapshot reflects the true historical order,
+  // not just whatever order they happened to appear in the file.
+
+  /// Imports vendor credit/payment history from parsed CSV rows. Each row
+  /// needs: vendor_name, type (CREDIT or PAYMENT), amount, date — notes
+  /// is optional. Rows that don't match an existing vendor by name, or
+  /// are missing a valid date/amount/type, are skipped and counted.
+  Future<Map<String, int>> importVendorCreditHistory(List<Map<String, dynamic>> rows) async {
+    final valid = <Map<String, dynamic>>[];
+    var skipped = 0;
+    for (final row in rows) {
+      final vendorName = (row['vendor_name'] as String? ?? '').trim();
+      final type = (row['type'] as String? ?? '').trim().toUpperCase();
+      final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+      final parsedDate = DateTime.tryParse((row['date'] as String? ?? '').trim());
+      if (vendorName.isEmpty || amount <= 0 || (type != 'CREDIT' && type != 'PAYMENT') || parsedDate == null) {
+        skipped++;
+        continue;
+      }
+      valid.add({
+        'vendor_name': vendorName,
+        'type': type,
+        'amount': amount,
+        'date': parsedDate.toIso8601String(),
+        'notes': row['notes'],
+      });
+    }
+    valid.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+
+    var imported = 0;
+    for (final row in valid) {
+      final existing = await _vendors
+          .where('name_lower', isEqualTo: (row['vendor_name'] as String).toLowerCase())
+          .limit(1)
+          .get();
+      if (existing.docs.isEmpty) {
+        skipped++;
+        continue;
+      }
+      await addCreditTransaction(
+        vendorId: existing.docs.first.id,
+        type: row['type'] as String,
+        amount: row['amount'] as double,
+        notes: row['notes'] as String?,
+        date: row['date'] as String,
+      );
+      imported++;
+    }
+    return {'imported': imported, 'skipped': skipped};
+  }
+
+  /// Same as importVendorCreditHistory, for suppliers. Each row needs:
+  /// supplier_name, type (PURCHASE or PAYMENT), amount, date, and
+  /// optional notes.
+  Future<Map<String, int>> importSupplierTransactionHistory(List<Map<String, dynamic>> rows) async {
+    final valid = <Map<String, dynamic>>[];
+    var skipped = 0;
+    for (final row in rows) {
+      final supplierName = (row['supplier_name'] as String? ?? '').trim();
+      final type = (row['type'] as String? ?? '').trim().toUpperCase();
+      final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+      final parsedDate = DateTime.tryParse((row['date'] as String? ?? '').trim());
+      if (supplierName.isEmpty ||
+          amount <= 0 ||
+          (type != 'PURCHASE' && type != 'PAYMENT') ||
+          parsedDate == null) {
+        skipped++;
+        continue;
+      }
+      valid.add({
+        'supplier_name': supplierName,
+        'type': type,
+        'amount': amount,
+        'date': parsedDate.toIso8601String(),
+        'notes': row['notes'],
+      });
+    }
+    valid.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+
+    var imported = 0;
+    for (final row in valid) {
+      final existing = await _suppliers
+          .where('name_lower', isEqualTo: (row['supplier_name'] as String).toLowerCase())
+          .limit(1)
+          .get();
+      if (existing.docs.isEmpty) {
+        skipped++;
+        continue;
+      }
+      await addSupplierTransaction(
+        supplierId: existing.docs.first.id,
+        type: row['type'] as String,
+        amount: row['amount'] as double,
+        notes: row['notes'] as String?,
+      );
+      imported++;
+    }
+    return {'imported': imported, 'skipped': skipped};
   }
 }

@@ -31,28 +31,18 @@ class SalesScreen extends StatefulWidget {
 
 class _SalesScreenState extends State<SalesScreen> {
   final _db = DBHelper.instance;
-  List<Map<String, dynamic>> _sales = [];
   List<Map<String, dynamic>> _monthlyTrend = [];
   bool _todayOnly = true;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loadTrend();
   }
 
-  Future<void> _load() async {
-    final filter = _todayOnly ? DateTime.now().toIso8601String().substring(0, 10) : null;
-    // Run both queries at once instead of one after another — cuts the
-    // wait roughly in half.
-    final results = await Future.wait([
-      _db.getSales(dateFilter: filter),
-      _db.getSalesSummaryByDay(days: 30),
-    ]);
-    setState(() {
-      _sales = results[0];
-      _monthlyTrend = results[1].reversed.toList();
-    });
+  Future<void> _loadTrend() async {
+    final trend = await _db.getSalesSummaryByDay(days: 30);
+    if (mounted) setState(() => _monthlyTrend = trend.reversed.toList());
   }
 
   Future<void> _cancelSale(String saleId, {bool closeSheet = true}) async {
@@ -84,7 +74,7 @@ class _SalesScreenState extends State<SalesScreen> {
       return;
     }
     if (closeSheet && mounted) Navigator.pop(context); // close the sale detail sheet
-    _load();
+    _loadTrend(); // the sales list itself is a live stream and updates on its own
   }
 
   Future<void> _modifySale(Map<String, dynamic> sale, List<Map<String, dynamic>> items,
@@ -128,9 +118,9 @@ class _SalesScreenState extends State<SalesScreen> {
         ),
       ),
     );
-    // Reload regardless of the re-entry result — the original sale was
-    // already cancelled either way, so the list is stale until refreshed.
-    _load();
+    // The list is a live stream now — it'll reflect both the cancellation
+    // and the new re-entered sale on its own. Just refresh the trend chart.
+    _loadTrend();
   }
 
   /// Long-press quick menu: Modify / Delete without needing to open the
@@ -256,9 +246,6 @@ class _SalesScreenState extends State<SalesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final total = _sales.fold<double>(
-        0, (sum, s) => s['status'] == 'cancelled' ? sum : sum + (s['total_amount'] as num));
-    final activeCount = _sales.where((s) => s['status'] != 'cancelled').length;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Sales'),
@@ -268,92 +255,107 @@ class _SalesScreenState extends State<SalesScreen> {
             tooltip: _todayOnly ? 'Showing today — tap for all' : 'Showing all — tap for today',
             onPressed: () {
               setState(() => _todayOnly = !_todayOnly);
-              _load();
             },
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: Theme.of(context).colorScheme.primaryContainer,
-            child: Text(
-              '${_todayOnly ? "Today's" : "Total"} Sales: ${formatCurrency(total)}  ($activeCount bills)',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-          Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              title: const Text('Monthly Sales Trend', style: TextStyle(fontSize: 14)),
-              subtitle: const Text('Last 30 days', style: TextStyle(fontSize: 11)),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                  child: SizedBox(height: 160, child: _MonthlyTrendChart(data: _monthlyTrend)),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _db.watchSales(
+            dateFilter: _todayOnly ? DateTime.now().toIso8601String().substring(0, 10) : null),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Could not load sales: ${snapshot.error}'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final sales = snapshot.data!;
+          final total = sales.fold<double>(
+              0, (sum, s) => s['status'] == 'cancelled' ? sum : sum + (s['total_amount'] as num));
+          final activeCount = sales.where((s) => s['status'] != 'cancelled').length;
+
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: Text(
+                  '${_todayOnly ? "Today's" : "Total"} Sales: ${formatCurrency(total)}  ($activeCount bills)',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: _sales.isEmpty
-                ? const Center(child: Text('No sales recorded. Tap + to add a sale.'))
-                : ListView.builder(
-                    itemCount: _sales.length,
-                    itemBuilder: (_, i) {
-                      final s = _sales[i];
-                      final isCancelled = s['status'] == 'cancelled';
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        color: isCancelled ? Colors.grey.shade100 : null,
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: isCancelled
-                                ? Colors.grey.shade300
-                                : (s['payment_type'] == 'CASH'
-                                    ? Colors.green.shade100
-                                    : Colors.orange.shade100),
-                            child: Icon(
-                              isCancelled
-                                  ? Icons.block
-                                  : (s['payment_type'] == 'CASH' ? Icons.money : Icons.credit_card),
-                              color: isCancelled
-                                  ? Colors.grey.shade600
-                                  : (s['payment_type'] == 'CASH' ? Colors.green : Colors.orange),
+              ),
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  title: const Text('Monthly Sales Trend', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text('Last 30 days', style: TextStyle(fontSize: 11)),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: SizedBox(height: 160, child: _MonthlyTrendChart(data: _monthlyTrend)),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: sales.isEmpty
+                    ? const Center(child: Text('No sales recorded. Tap + to add a sale.'))
+                    : ListView.builder(
+                        itemCount: sales.length,
+                        itemBuilder: (_, i) {
+                          final s = sales[i];
+                          final isCancelled = s['status'] == 'cancelled';
+                          return Card(
+                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            color: isCancelled ? Colors.grey.shade100 : null,
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: isCancelled
+                                    ? Colors.grey.shade300
+                                    : (s['payment_type'] == 'CASH'
+                                        ? Colors.green.shade100
+                                        : Colors.orange.shade100),
+                                child: Icon(
+                                  isCancelled
+                                      ? Icons.block
+                                      : (s['payment_type'] == 'CASH' ? Icons.money : Icons.credit_card),
+                                  color: isCancelled
+                                      ? Colors.grey.shade600
+                                      : (s['payment_type'] == 'CASH' ? Colors.green : Colors.orange),
+                                ),
+                              ),
+                              title: Text(
+                                formatCurrency(s['total_amount']),
+                                style: isCancelled
+                                    ? const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.grey)
+                                    : null,
+                              ),
+                              subtitle: Text(
+                                isCancelled
+                                    ? 'CANCELLED  •  ${formatDate(s['date'] as String)}'
+                                    : s['due_date'] != null
+                                        ? '${formatDate(s['date'] as String)}\nDue ${formatDay(s['due_date'] as String)}'
+                                        : formatDate(s['date'] as String),
+                                style: isCancelled ? const TextStyle(color: Colors.red) : null,
+                              ),
+                              isThreeLine: !isCancelled && s['due_date'] != null,
+                              trailing: Text(s['payment_type'] as String),
+                              onTap: () => _viewSale(s),
+                              onLongPress: () => _showSaleActions(s),
                             ),
-                          ),
-                          title: Text(
-                            formatCurrency(s['total_amount']),
-                            style: isCancelled
-                                ? const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.grey)
-                                : null,
-                          ),
-                          subtitle: Text(
-                            isCancelled
-                                ? 'CANCELLED  •  ${formatDate(s['date'] as String)}'
-                                : s['due_date'] != null
-                                    ? '${formatDate(s['date'] as String)}\nDue ${formatDay(s['due_date'] as String)}'
-                                    : formatDate(s['date'] as String),
-                            style: isCancelled ? const TextStyle(color: Colors.red) : null,
-                          ),
-                          isThreeLine: !isCancelled && s['due_date'] != null,
-                          trailing: Text(s['payment_type'] as String),
-                          onTap: () => _viewSale(s),
-                          onLongPress: () => _showSaleActions(s),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          final result = await Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const NewSaleScreen()));
-          if (result == true) _load();
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => const NewSaleScreen()));
+          _loadTrend();
         },
         child: const Icon(Icons.add),
       ),

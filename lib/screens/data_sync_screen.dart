@@ -247,6 +247,48 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
     });
   }
 
+  Future<void> _importVendorCreditHistory() async {
+    await _runBusy(() async {
+      final content = await _pickCsvContent();
+      if (content == null) return;
+      final rows = csvRowsToMaps(parseCsv(content));
+      final parsed = rows
+          .map((r) => {
+                'vendor_name': r['vendor_name'] ?? '',
+                'type': r['type'] ?? '',
+                'amount': double.tryParse(r['amount'] ?? '') ?? 0.0,
+                'date': r['date'] ?? '',
+                'notes': r['notes'] ?? '',
+              })
+          .toList();
+      final result = await _db.importVendorCreditHistory(parsed);
+      setState(() => _status =
+          'Vendor credit history: ${result['imported']} entries imported, ${result['skipped']} skipped '
+          '(vendor not found by name, or missing/invalid date, amount, or type).');
+    });
+  }
+
+  Future<void> _importSupplierTransactionHistory() async {
+    await _runBusy(() async {
+      final content = await _pickCsvContent();
+      if (content == null) return;
+      final rows = csvRowsToMaps(parseCsv(content));
+      final parsed = rows
+          .map((r) => {
+                'supplier_name': r['supplier_name'] ?? '',
+                'type': r['type'] ?? '',
+                'amount': double.tryParse(r['amount'] ?? '') ?? 0.0,
+                'date': r['date'] ?? '',
+                'notes': r['notes'] ?? '',
+              })
+          .toList();
+      final result = await _db.importSupplierTransactionHistory(parsed);
+      setState(() => _status =
+          'Supplier transaction history: ${result['imported']} entries imported, ${result['skipped']} skipped '
+          '(supplier not found by name, or missing/invalid date, amount, or type).');
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -285,10 +327,11 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
           Text('Import', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           const Text(
-            'Only products, vendors, and suppliers can be imported — this "master data" is '
-            'safe to bring in from a file. Sales and credit/payment history are export-only: '
-            'importing them back could double-count stock or balances, so that\'s deliberately '
-            'not offered here.',
+            'Products, vendors, and suppliers update or add records by name. Vendor/supplier '
+            'credit history can also be imported — each row (date, name, type, amount, notes) '
+            'is replayed the same safe way as entering it by hand, so balances stay correct. '
+            'Sales themselves are still export-only, since importing one back would double-count '
+            'stock.',
             style: TextStyle(fontSize: 12.5, color: Colors.black54),
           ),
           const SizedBox(height: 10),
@@ -308,6 +351,35 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
             onPressed: _busy ? null : _importSuppliers,
             icon: const Icon(Icons.local_shipping_outlined),
             label: const Text('Import Suppliers CSV'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _importVendorCreditHistory,
+            icon: const Icon(Icons.receipt_long_outlined),
+            label: const Text('Import Vendor Credit History CSV'),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              'Columns: date, vendor_name, type (CREDIT or PAYMENT), amount, notes — '
+              'same shape as the exported credit_transactions.csv.',
+              style: TextStyle(fontSize: 11, color: Colors.black45),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _importSupplierTransactionHistory,
+            icon: const Icon(Icons.receipt_long_outlined),
+            label: const Text('Import Supplier Transaction History CSV'),
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              'Columns: date, supplier_name, type (PURCHASE or PAYMENT), amount, notes.',
+              style: TextStyle(fontSize: 11, color: Colors.black45),
+            ),
           ),
           if (_busy) ...[
             const SizedBox(height: 20),

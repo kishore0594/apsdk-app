@@ -11,34 +11,6 @@ class SuppliersScreen extends StatefulWidget {
 
 class _SuppliersScreenState extends State<SuppliersScreen> {
   final _db = DBHelper.instance;
-  List<Map<String, dynamic>> _suppliers = [];
-  Map<String, double> _balances = {};
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final suppliers = await _db.getSuppliers();
-      // getSuppliers() already includes each supplier's balance field —
-      // same optimization as vendors, avoids a query per supplier.
-      final balances = <String, double>{
-        for (final s in suppliers) s['id'] as String: (s['balance'] as num?)?.toDouble() ?? 0
-      };
-      setState(() {
-        _suppliers = suppliers;
-        _balances = balances;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not load suppliers: $e')));
-      }
-    }
-  }
 
   Future<void> _addSupplier() async {
     final nameCtrl = TextEditingController();
@@ -78,58 +50,178 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
         'opening_balance': double.tryParse(openingCtrl.text) ?? 0,
         'created_at': DateTime.now().toIso8601String(),
       });
-      _load();
+      // Live stream below updates on its own — no manual refresh needed.
+    }
+  }
+
+  Future<void> _editSupplier(Map<String, dynamic> supplier) async {
+    final nameCtrl = TextEditingController(text: supplier['name'] as String? ?? '');
+    final phoneCtrl = TextEditingController(text: supplier['phone'] as String? ?? '');
+    final addressCtrl = TextEditingController(text: supplier['address'] as String? ?? '');
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Edit Supplier'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
+            TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Address')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (saved != true || nameCtrl.text.trim().isEmpty) return;
+    try {
+      await _db.updateSupplier(
+        supplier['id'] as String,
+        name: nameCtrl.text.trim(),
+        phone: phoneCtrl.text.trim(),
+        address: addressCtrl.text.trim(),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+      }
+    }
+  }
+
+  Future<void> _deleteSupplier(Map<String, dynamic> supplier) async {
+    final balance = (supplier['balance'] as num?)?.toDouble() ?? 0;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Delete ${supplier['name']}?'),
+        content: Text(
+          balance > 0
+              ? 'You still owe this supplier ${formatCurrency(balance)}. Deleting them removes '
+                  'the supplier from your list — their past transaction records stay in your data '
+                  'exports, but the balance itself won\'t be tracked anywhere once they\'re gone. '
+                  'This can\'t be undone.'
+              : 'This can\'t be undone. Their past transaction records stay in your data exports.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await _db.deleteSupplier(supplier['id'] as String);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: $e')));
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final totalOwed = _balances.values.fold<double>(0, (sum, b) => sum + b);
     return Scaffold(
       appBar: AppBar(title: const Text('Suppliers')),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: Theme.of(context).colorScheme.primaryContainer,
-            child: Text('Total Owed to Suppliers: ${formatCurrency(totalOwed)}',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          Expanded(
-            child: _suppliers.isEmpty
-                ? const Center(child: Text('No suppliers yet. Tap + to add one.'))
-                : ListView.builder(
-                    itemCount: _suppliers.length,
-                    itemBuilder: (_, i) {
-                      final s = _suppliers[i];
-                      final balance = _balances[s['id']] ?? 0;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        child: ListTile(
-                          leading: CircleAvatar(child: Text((s['name'] as String)[0].toUpperCase())),
-                          title: Text(s['name'] as String),
-                          subtitle: Text(s['phone'] as String? ?? ''),
-                          trailing: Text(
-                            formatCurrency(balance),
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: balance > 0 ? Colors.red : Colors.green,
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _db.watchSuppliers(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Could not load suppliers: ${snapshot.error}'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final suppliers = snapshot.data!;
+          final totalOwed = suppliers.fold<double>(
+              0, (sum, s) => sum + ((s['balance'] as num?)?.toDouble() ?? 0));
+
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: Text('Total Owed to Suppliers: ${formatCurrency(totalOwed)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              Expanded(
+                child: suppliers.isEmpty
+                    ? const Center(child: Text('No suppliers yet. Tap + to add one.'))
+                    : ListView.builder(
+                        itemCount: suppliers.length,
+                        itemBuilder: (_, i) {
+                          final s = suppliers[i];
+                          final balance = (s['balance'] as num?)?.toDouble() ?? 0;
+                          return Card(
+                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            child: ListTile(
+                              leading:
+                                  CircleAvatar(child: Text((s['name'] as String)[0].toUpperCase())),
+                              title: Text(s['name'] as String),
+                              subtitle: Text(s['phone'] as String? ?? ''),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    formatCurrency(balance),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: balance > 0 ? Colors.red : Colors.green,
+                                    ),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
+                                    padding: EdgeInsets.zero,
+                                    onSelected: (choice) {
+                                      if (choice == 'edit') {
+                                        _editSupplier(s);
+                                      } else if (choice == 'delete') {
+                                        _deleteSupplier(s);
+                                      }
+                                    },
+                                    itemBuilder: (_) => const [
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: ListTile(
+                                          leading: Icon(Icons.edit_outlined),
+                                          title: Text('Edit'),
+                                          contentPadding: EdgeInsets.zero,
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: ListTile(
+                                          leading: Icon(Icons.delete_outline, color: Colors.red),
+                                          title: Text('Delete', style: TextStyle(color: Colors.red)),
+                                          contentPadding: EdgeInsets.zero,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => SupplierDetailScreen(supplier: s)),
+                                );
+                              },
                             ),
-                          ),
-                          onTap: () async {
-                            await Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (_) => SupplierDetailScreen(supplier: s)),
-                            );
-                            _load();
-                          },
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(onPressed: _addSupplier, child: const Icon(Icons.add_business)),
     );
@@ -146,32 +238,6 @@ class SupplierDetailScreen extends StatefulWidget {
 
 class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   final _db = DBHelper.instance;
-  List<Map<String, dynamic>> _transactions = [];
-  double _balance = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final results = await Future.wait([
-        _db.getSupplierTransactions(widget.supplier['id'] as String),
-        _db.getSupplierBalance(widget.supplier['id'] as String),
-      ]);
-      setState(() {
-        _transactions = results[0] as List<Map<String, dynamic>>;
-        _balance = results[1] as double;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not load this supplier: $e')));
-      }
-    }
-  }
 
   Future<void> _recordPayment() async {
     final amountCtrl = TextEditingController();
@@ -210,82 +276,102 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
         amount: amount,
         notes: notesCtrl.text.trim(),
       );
-      _load();
     }
   }
 
   Future<void> _openNewPurchase() async {
-    final result = await showModalBottomSheet<bool>(
+    await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _NewPurchaseSheet(supplierId: widget.supplier['id'] as String),
     );
-    if (result == true) _load();
   }
 
   @override
   Widget build(BuildContext context) {
+    final supplierId = widget.supplier['id'] as String;
     return Scaffold(
       appBar: AppBar(title: Text(widget.supplier['name'] as String)),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: _balance > 0 ? Colors.red.shade50 : Colors.green.shade50,
-            child: Column(
-              children: [
-                const Text('Amount Owed to Supplier'),
-                Text(
-                  formatCurrency(_balance),
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: _balance > 0 ? Colors.red : Colors.green,
-                  ),
+      body: StreamBuilder<Map<String, dynamic>?>(
+        stream: _db.watchSupplier(supplierId),
+        builder: (context, supplierSnap) {
+          final supplier = supplierSnap.data ?? widget.supplier;
+          final balance = (supplier['balance'] as num?)?.toDouble() ?? 0;
+
+          return Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                color: balance > 0 ? Colors.red.shade50 : Colors.green.shade50,
+                child: Column(
+                  children: [
+                    const Text('Amount Owed to Supplier'),
+                    Text(
+                      formatCurrency(balance),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: balance > 0 ? Colors.red : Colors.green,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _openNewPurchase,
-                    icon: const Icon(Icons.local_shipping),
-                    label: const Text('New Purchase'),
-                  ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _openNewPurchase,
+                        icon: const Icon(Icons.local_shipping),
+                        label: const Text('New Purchase'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _recordPayment,
+                        icon: const Icon(Icons.payments),
+                        label: const Text('Pay Supplier'),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _recordPayment,
-                    icon: const Icon(Icons.payments),
-                    label: const Text('Pay Supplier'),
-                  ),
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Transaction History', style: Theme.of(context).textTheme.titleMedium),
                 ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Transaction History', style: Theme.of(context).textTheme.titleMedium),
-            ),
-          ),
-          Expanded(
-            child: _transactions.isEmpty
-                ? const Center(child: Text('No transactions yet.'))
-                : ListView.builder(
-                    itemCount: _transactions.length,
-                    itemBuilder: (_, i) => _SupplierTxnTile(txn: _transactions[i]),
-                  ),
-          ),
-        ],
+              ),
+              Expanded(
+                child: StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: _db.watchSupplierTransactions(supplierId),
+                  builder: (context, txnSnap) {
+                    if (txnSnap.hasError) {
+                      return Center(child: Text('Could not load history: ${txnSnap.error}'));
+                    }
+                    if (!txnSnap.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final transactions = txnSnap.data!;
+                    if (transactions.isEmpty) {
+                      return const Center(child: Text('No transactions yet.'));
+                    }
+                    return ListView.builder(
+                      itemCount: transactions.length,
+                      itemBuilder: (_, i) => _SupplierTxnTile(txn: transactions[i]),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

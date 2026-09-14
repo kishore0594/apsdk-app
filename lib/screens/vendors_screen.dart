@@ -132,6 +132,78 @@ class _VendorsScreenState extends State<VendorsScreen> {
     }
   }
 
+  Future<void> _editVendor(Map<String, dynamic> vendor) async {
+    final nameCtrl = TextEditingController(text: vendor['name'] as String? ?? '');
+    final phoneCtrl = TextEditingController(text: vendor['phone'] as String? ?? '');
+    final addressCtrl = TextEditingController(text: vendor['address'] as String? ?? '');
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Edit Vendor'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
+            TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Place')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (saved != true || nameCtrl.text.trim().isEmpty) return;
+    try {
+      await _db.updateVendor(
+        vendor['id'] as String,
+        name: nameCtrl.text.trim(),
+        phone: phoneCtrl.text.trim(),
+        address: addressCtrl.text.trim(),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+      }
+    }
+  }
+
+  Future<void> _deleteVendor(Map<String, dynamic> vendor) async {
+    final balance = (vendor['balance'] as num?)?.toDouble() ?? 0;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Delete ${vendor['name']}?'),
+        content: Text(
+          balance > 0
+              ? 'This vendor still has an outstanding balance of ${formatCurrency(balance)}. '
+                  'Deleting them removes the vendor from your list — their past transaction records '
+                  'stay in your data exports, but the balance itself won\'t be tracked anywhere '
+                  'once they\'re gone. This can\'t be undone.'
+              : 'This can\'t be undone. Their past transaction records stay in your data exports.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await _db.deleteVendor(vendor['id'] as String);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: $e')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -237,6 +309,35 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                               fontWeight: FontWeight.bold,
                                               fontSize: 15,
                                               color: owes ? AppTheme.danger : AppTheme.success,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      PopupMenuButton<String>(
+                                        icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
+                                        padding: EdgeInsets.zero,
+                                        onSelected: (choice) {
+                                          if (choice == 'edit') {
+                                            _editVendor(v);
+                                          } else if (choice == 'delete') {
+                                            _deleteVendor(v);
+                                          }
+                                        },
+                                        itemBuilder: (_) => const [
+                                          PopupMenuItem(
+                                            value: 'edit',
+                                            child: ListTile(
+                                              leading: Icon(Icons.edit_outlined),
+                                              title: Text('Edit'),
+                                              contentPadding: EdgeInsets.zero,
+                                            ),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'delete',
+                                            child: ListTile(
+                                              leading: Icon(Icons.delete_outline, color: AppTheme.danger),
+                                              title: Text('Delete', style: TextStyle(color: AppTheme.danger)),
+                                              contentPadding: EdgeInsets.zero,
                                             ),
                                           ),
                                         ],
