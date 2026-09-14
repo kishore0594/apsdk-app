@@ -28,6 +28,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> _paymentMix = [];
   List<Map<String, dynamic>> _topProducts = [];
   List<Map<String, dynamic>> _byCategory = [];
+  List<Map<String, dynamic>> _bySubcategory = [];
 
   @override
   void initState() {
@@ -85,6 +86,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _db.getPaymentTypeWiseSales(startIso: start, endIsoExclusive: end),
         _db.getProductWiseSales(startIso: start, endIsoExclusive: end),
         _db.getCategoryWiseSales(startIso: start, endIsoExclusive: end),
+        _db.getSubcategoryWiseSales(startIso: start, endIsoExclusive: end),
       ]);
       final summary = results[0] as Map<String, dynamic>;
       setState(() {
@@ -96,6 +98,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _paymentMix = results[2] as List<Map<String, dynamic>>;
         _topProducts = (results[3] as List<Map<String, dynamic>>).take(5).toList();
         _byCategory = results[4] as List<Map<String, dynamic>>;
+        _bySubcategory = results[5] as List<Map<String, dynamic>>;
         _loading = false;
       });
     } catch (e) {
@@ -243,6 +246,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                         c['category'] as String, (c['total'] as num).toDouble()))
                                     .toList(),
                                 barColor: const Color(0xFF7C3AED),
+                              ),
+                      ),
+                      const SizedBox(height: 28),
+                      _SectionHeader('By Subcategory'),
+                      const SizedBox(height: 12),
+                      _ChartCard(
+                        child: _bySubcategory.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Text('No sales in this period.'),
+                              )
+                            : _RankedList(
+                                items: _bySubcategory
+                                    .map((c) => _RankedItem(
+                                        c['subcategory'] as String, (c['total'] as num).toDouble()))
+                                    .toList(),
+                                barColor: const Color(0xFFD97706),
                               ),
                       ),
                       const SizedBox(height: 28),

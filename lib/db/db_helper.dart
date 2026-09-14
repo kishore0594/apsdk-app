@@ -647,14 +647,18 @@ class DBHelper {
       final qty = (item['quantity'] as num).toDouble();
       final price = (item['unit_price'] as num).toDouble();
       final pid = item['product_id'] as String?;
-      // Snapshot cost + category at time of sale (not just now, in case
-      // the product's price/category changes later) — feeds the Gross
-      // Profit and By-Category numbers on Reports & Trends.
+      // Snapshot cost + category/subcategory at time of sale (not just
+      // now, in case the product's price/category changes later) — feeds
+      // the Gross Profit and By-Category/By-Subcategory numbers on
+      // Reports & Trends.
       final unitCost = (pid != null && productData.containsKey(pid))
           ? (productData[pid]!['cost_price'] as num?)?.toDouble() ?? 0
           : 0.0;
       final category = (pid != null && productData.containsKey(pid))
           ? (productData[pid]!['category'] as String? ?? '')
+          : '';
+      final subcategory = (pid != null && productData.containsKey(pid))
+          ? (productData[pid]!['subcategory'] as String? ?? '')
           : '';
       batch.set(_saleItems.doc(), {
         'sale_id': saleRef.id,
@@ -666,6 +670,7 @@ class DBHelper {
         'subtotal': qty * price,
         'unit_cost': unitCost,
         'category': category,
+        'subcategory': subcategory,
         'status': 'confirmed',
       });
 
@@ -977,6 +982,31 @@ class DBHelper {
       totals[key] = (totals[key] ?? 0) + ((data['subtotal'] as num?)?.toDouble() ?? 0);
     }
     final result = totals.entries.map((e) => {'category': e.key, 'total': e.value}).toList();
+    result.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    return result;
+  }
+
+  /// Same as getCategoryWiseSales, but grouped by subcategory — feeds the
+  /// "By Subcategory" section of Reports & Trends. Only sales made after
+  /// subcategory-snapshotting was added will have this field; older sale
+  /// items group under "—" along with products that have no subcategory.
+  Future<List<Map<String, dynamic>>> getSubcategoryWiseSales({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    final snap = await _saleItems
+        .where('sale_date', isGreaterThanOrEqualTo: startIso)
+        .where('sale_date', isLessThan: endIsoExclusive)
+        .get();
+    final totals = <String, double>{};
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['status'] == 'cancelled') continue;
+      final subcategory = (data['subcategory'] as String?)?.trim();
+      final key = (subcategory == null || subcategory.isEmpty) ? '—' : subcategory;
+      totals[key] = (totals[key] ?? 0) + ((data['subtotal'] as num?)?.toDouble() ?? 0);
+    }
+    final result = totals.entries.map((e) => {'subcategory': e.key, 'total': e.value}).toList();
     result.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
     return result;
   }

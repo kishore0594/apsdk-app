@@ -770,30 +770,34 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                     selected: {_paymentType},
                     onSelectionChanged: (s) => setState(() => _paymentType = s.first),
                   ),
-                  if (_paymentType != 'CASH') ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            value: _vendorId,
-                            decoration: const InputDecoration(labelText: 'Vendor (credit customer)'),
-                            items: _vendors
-                                .map((v) =>
-                                    DropdownMenuItem(value: v['id'] as String, child: Text(v['name'] as String)))
-                                .toList(),
-                            onChanged: (v) => setState(() => _vendorId = v),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _vendorId,
+                          decoration: InputDecoration(
+                            labelText: _paymentType == 'CASH'
+                                ? 'Customer (optional)'
+                                : 'Vendor (credit customer)',
                           ),
+                          items: _vendors
+                              .map((v) =>
+                                  DropdownMenuItem(value: v['id'] as String, child: Text(v['name'] as String)))
+                              .toList(),
+                          onChanged: (v) => setState(() => _vendorId = v),
                         ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          tooltip: 'Add new vendor',
-                          onPressed: _quickAddVendor,
-                          icon: const Icon(Icons.person_add),
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Add new vendor',
+                        onPressed: _quickAddVendor,
+                        icon: const Icon(Icons.person_add),
+                      ),
+                    ],
+                  ),
+                  if (_paymentType != 'CASH') ...[
                     const SizedBox(height: 8),
                     ListTile(
                       contentPadding: EdgeInsets.zero,

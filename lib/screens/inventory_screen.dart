@@ -11,23 +11,16 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   final _db = DBHelper.instance;
-  List<Map<String, dynamic>> _products = [];
+  // Created once — search/category filtering happens client-side on
+  // whatever this stream last emitted, so typing in the search box never
+  // triggers a new Firestore subscription.
+  late final Stream<List<Map<String, dynamic>>> _productsStream = _db.watchProducts();
   String _search = '';
   String _categoryFilter = 'All';
+  String _subcategoryFilter = 'All';
 
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final products = await _db.getProducts(search: _search);
-    setState(() => _products = products);
-  }
-
-  List<String> get _categoryChips {
-    final cats = _products
+  List<String> _categoryChips(List<Map<String, dynamic>> products) {
+    final cats = products
         .map((p) => (p['category'] as String? ?? '').trim())
         .where((c) => c.isNotEmpty)
         .toSet()
@@ -36,16 +29,42 @@ class _InventoryScreenState extends State<InventoryScreen> {
     return ['All', ...cats, 'Low Stock'];
   }
 
-  List<Map<String, dynamic>> get _filteredProducts {
-    if (_categoryFilter == 'All') return _products;
+  /// Subcategories that exist *within the currently selected category* —
+  /// empty when "All" or "Low Stock" is selected, since subcategory only
+  /// makes sense once you've narrowed to one category.
+  List<String> _subcategoryChips(List<Map<String, dynamic>> products) {
+    if (_categoryFilter == 'All' || _categoryFilter == 'Low Stock') return [];
+    final subs = products
+        .where((p) => (p['category'] as String? ?? '') == _categoryFilter)
+        .map((p) => (p['subcategory'] as String? ?? '').trim())
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    if (subs.isEmpty) return [];
+    return ['All', ...subs];
+  }
+
+  List<Map<String, dynamic>> _filteredProducts(List<Map<String, dynamic>> products) {
+    var list = products;
+    if (_search.isNotEmpty) {
+      final q = _search.toLowerCase();
+      list = list.where((p) => (p['name'] as String).toLowerCase().contains(q)).toList();
+    }
     if (_categoryFilter == 'Low Stock') {
-      return _products.where((p) {
+      return list.where((p) {
         final qty = (p['quantity'] as num).toDouble();
         final reorder = (p['reorder_level'] as num).toDouble();
         return qty <= reorder;
       }).toList();
     }
-    return _products.where((p) => (p['category'] as String? ?? '') == _categoryFilter).toList();
+    if (_categoryFilter != 'All') {
+      list = list.where((p) => (p['category'] as String? ?? '') == _categoryFilter).toList();
+      if (_subcategoryFilter != 'All') {
+        list = list.where((p) => (p['subcategory'] as String? ?? '') == _subcategoryFilter).toList();
+      }
+    }
+    return list;
   }
 
   String _productSubtitle(Map<String, dynamic> p) {
@@ -58,12 +77,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Future<void> _openProductForm({Map<String, dynamic>? product}) async {
-    final result = await showModalBottomSheet<bool>(
+    await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _ProductForm(product: product),
     );
-    if (result == true) _load();
+    // No manual refresh needed — the list below is a live stream.
   }
 
   Future<void> _openStockHistory(Map<String, dynamic> product) async {
@@ -114,74 +133,112 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Inventory')),
-      body: Column(
-        children: [
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              children: _categoryChips.map((cat) {
-                final selected = _categoryFilter == cat;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(cat),
-                    selected: selected,
-                    onSelected: (_) => setState(() => _categoryFilter = cat),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              decoration: const InputDecoration(
-                labelText: 'Search products',
-                prefixIcon: Icon(Icons.search),
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _productsStream,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Could not load inventory: ${snapshot.error}'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final products = snapshot.data!;
+          final filtered = _filteredProducts(products);
+
+          return Column(
+            children: [
+              SizedBox(
+                height: 44,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: _categoryChips(products).map((cat) {
+                    final selected = _categoryFilter == cat;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(cat),
+                        selected: selected,
+                        onSelected: (_) => setState(() {
+                          _categoryFilter = cat;
+                          _subcategoryFilter = 'All'; // reset — subcategories differ per category
+                        }),
+                      ),
+                    );
+                  }).toList(),
+                ),
               ),
-              onChanged: (v) {
-                _search = v;
-                _load();
-              },
-            ),
-          ),
-          Expanded(
-            child: _filteredProducts.isEmpty
-                ? const Center(child: Text('No products yet. Tap + to add one.'))
-                : ListView.builder(
-                    itemCount: _filteredProducts.length,
-                    itemBuilder: (_, i) {
-                      final p = _filteredProducts[i];
-                      final qty = (p['quantity'] as num).toDouble();
-                      final reorder = (p['reorder_level'] as num).toDouble();
-                      final low = qty <= reorder;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        child: ListTile(
-                          title: Text(p['name'] as String),
-                          subtitle: Text(_productSubtitle(p)),
-                          trailing: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text('$qty ${p['unit']}',
-                                  style: TextStyle(
-                                      color: low ? Colors.red : Colors.black87,
-                                      fontWeight: FontWeight.bold)),
-                              if (low)
-                                const Text('Low stock', style: TextStyle(color: Colors.red, fontSize: 11)),
-                            ],
+              if (_subcategoryChips(products).isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: SizedBox(
+                    height: 38,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      children: _subcategoryChips(products).map((sub) {
+                        final selected = _subcategoryFilter == sub;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            visualDensity: VisualDensity.compact,
+                            label: Text(sub, style: const TextStyle(fontSize: 12)),
+                            selected: selected,
+                            onSelected: (_) => setState(() => _subcategoryFilter = sub),
                           ),
-                          onTap: () => _openProductForm(product: p),
-                          onLongPress: () => _openStockHistory(p),
-                        ),
-                      );
-                    },
+                        );
+                      }).toList(),
+                    ),
                   ),
-          ),
-        ],
+                ),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: TextField(
+                  decoration: const InputDecoration(
+                    labelText: 'Search products',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (v) => setState(() => _search = v),
+                ),
+              ),
+              Expanded(
+                child: filtered.isEmpty
+                    ? const Center(child: Text('No products yet. Tap + to add one.'))
+                    : ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final p = filtered[i];
+                          final qty = (p['quantity'] as num).toDouble();
+                          final reorder = (p['reorder_level'] as num).toDouble();
+                          final low = qty <= reorder;
+                          return Card(
+                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            child: ListTile(
+                              title: Text(p['name'] as String),
+                              subtitle: Text(_productSubtitle(p)),
+                              trailing: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text('$qty ${p['unit']}',
+                                      style: TextStyle(
+                                          color: low ? Colors.red : Colors.black87,
+                                          fontWeight: FontWeight.bold)),
+                                  if (low)
+                                    const Text('Low stock',
+                                        style: TextStyle(color: Colors.red, fontSize: 11)),
+                                ],
+                              ),
+                              onTap: () => _openProductForm(product: p),
+                              onLongPress: () => _openStockHistory(p),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openProductForm(),
