@@ -763,7 +763,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 8),
                   SegmentedButton<String>(
-                    segments: const [
+                    segments: [
                       ButtonSegment(value: 'CASH', label: Text(AppStrings.t('cash'))),
                       ButtonSegment(value: 'CREDIT', label: Text(AppStrings.t('full_credit'))),
                       ButtonSegment(value: 'PARTIAL', label: Text(AppStrings.t('partial'))),

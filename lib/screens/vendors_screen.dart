@@ -335,11 +335,11 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                             _deleteVendor(v);
                                           }
                                         },
-                                        itemBuilder: (_) => const [
+                                        itemBuilder: (_) => [
                                           PopupMenuItem(
                                             value: 'edit',
                                             child: ListTile(
-                                              leading: Icon(Icons.edit_outlined),
+                                              leading: const Icon(Icons.edit_outlined),
                                               title: Text(AppStrings.t('edit')),
                                               contentPadding: EdgeInsets.zero,
                                             ),
@@ -347,7 +347,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                           PopupMenuItem(
                                             value: 'delete',
                                             child: ListTile(
-                                              leading: Icon(Icons.delete_outline, color: AppTheme.danger),
+                                              leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
                                               title: Text(AppStrings.t('delete'), style: const TextStyle(color: AppTheme.danger)),
                                               contentPadding: EdgeInsets.zero,
                                             ),

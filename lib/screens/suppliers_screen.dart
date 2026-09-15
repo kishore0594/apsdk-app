@@ -188,11 +188,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                                         _deleteSupplier(s);
                                       }
                                     },
-                                    itemBuilder: (_) => const [
+                                    itemBuilder: (_) => [
                                       PopupMenuItem(
                                         value: 'edit',
                                         child: ListTile(
-                                          leading: Icon(Icons.edit_outlined),
+                                          leading: const Icon(Icons.edit_outlined),
                                           title: Text(AppStrings.t('edit')),
                                           contentPadding: EdgeInsets.zero,
                                         ),
@@ -200,7 +200,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                                       PopupMenuItem(
                                         value: 'delete',
                                         child: ListTile(
-                                          leading: Icon(Icons.delete_outline, color: Colors.red),
+                                          leading: const Icon(Icons.delete_outline, color: Colors.red),
                                           title: Text(AppStrings.t('delete'), style: const TextStyle(color: Colors.red)),
                                           contentPadding: EdgeInsets.zero,
                                         ),
