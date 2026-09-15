@@ -421,8 +421,8 @@ class _SupplierTxnTile extends StatelessWidget {
             }
             final items = snapshot.data!;
             if (items.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.all(16),
+              return Padding(
+                padding: const EdgeInsets.all(16),
                 child: Text(AppStrings.t('no_product_details_purchase')),
               );
             }
@@ -542,8 +542,8 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
                     Text('${AppStrings.t('purchase_items')} (${_lines.length})',
                         style: Theme.of(context).textTheme.titleSmall),
                     if (_lines.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(12),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
                         child: Text(AppStrings.t('no_products_added_yet')),
                       )
                     else

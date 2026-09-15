@@ -195,9 +195,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: TextField(
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: AppStrings.t('search_products'),
-                    prefixIcon: Icon(Icons.search),
+                    prefixIcon: const Icon(Icons.search),
                   ),
                   onChanged: (v) => setState(() => _search = v),
                 ),

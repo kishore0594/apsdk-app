@@ -177,7 +177,7 @@ class _SalesScreenState extends State<SalesScreen> {
                       style: Theme.of(context).textTheme.titleLarge),
                 ),
                 if (isCancelled)
-                  const Chip(
+                  Chip(
                     label: Text(AppStrings.t('cancelled'), style: const TextStyle(fontSize: 11, color: Colors.white)),
                     backgroundColor: Colors.red,
                     visualDensity: VisualDensity.compact,
@@ -632,9 +632,9 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                         return TextField(
                           controller: controller,
                           focusNode: focusNode,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: AppStrings.t('type_product_search'),
-                            prefixIcon: Icon(Icons.search),
+                            prefixIcon: const Icon(Icons.search),
                           ),
                         );
                       },

@@ -220,8 +220,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       const SizedBox(height: 12),
                       _ChartCard(
                         child: _topProducts.isEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 16),
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
                                 child: Text(AppStrings.t('no_sales_in_period')),
                               )
                             : _RankedList(
@@ -237,8 +237,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       const SizedBox(height: 12),
                       _ChartCard(
                         child: _byCategory.isEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 16),
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
                                 child: Text(AppStrings.t('no_sales_in_period')),
                               )
                             : _RankedList(
@@ -254,8 +254,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       const SizedBox(height: 12),
                       _ChartCard(
                         child: _bySubcategory.isEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 16),
+                            ? Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
                                 child: Text(AppStrings.t('no_sales_in_period')),
                               )
                             : _RankedList(

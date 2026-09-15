@@ -639,8 +639,8 @@ class _TransactionTile extends StatelessWidget {
             }
             final items = snapshot.data!;
             if (items.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.all(16),
+              return Padding(
+                padding: const EdgeInsets.all(16),
                 child: Text(AppStrings.t('no_item_details')),
               );
             }
