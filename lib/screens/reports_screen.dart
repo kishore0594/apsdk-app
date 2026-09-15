@@ -4,6 +4,7 @@ import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_logo.dart';
 import '../utils/app_info.dart';
+import '../utils/app_strings.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -114,7 +115,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final (start, end, _) = _rangeAndDays();
     return Scaffold(
       backgroundColor: const Color(0xFFF7F8F7),
-      appBar: AppBar(title: const Text('Reports & Trends')),
+      appBar: AppBar(title: Text(AppStrings.t('reports_trends'))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -126,7 +127,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       children: [
                         Text(_error!, textAlign: TextAlign.center),
                         const SizedBox(height: 12),
-                        FilledButton(onPressed: _load, child: const Text('Retry')),
+                        FilledButton(onPressed: _load, child: Text(AppStrings.t('retry'))),
                       ],
                     ),
                   ),
@@ -145,7 +146,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         children: [
                           Expanded(
                             child: _PeriodPill(
-                              label: 'Week',
+                              label: AppStrings.t('week'),
                               selected: _period == 'Week',
                               onTap: () {
                                 setState(() => _period = 'Week');
@@ -156,7 +157,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: _PeriodPill(
-                              label: 'Month',
+                              label: AppStrings.t('month'),
                               selected: _period == 'Month',
                               onTap: () {
                                 setState(() => _period = 'Month');
@@ -167,7 +168,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: _PeriodPill(
-                              label: 'Custom',
+                              label: AppStrings.t('custom'),
                               selected: _period == 'Custom',
                               icon: Icons.calendar_month,
                               onTap: _pickCustomRange,
@@ -185,43 +186,43 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         childAspectRatio: 1.55,
                         children: [
                           _MetricCard(
-                              label: 'Revenue',
+                              label: AppStrings.t('revenue'),
                               value: formatCurrency(_revenue),
                               icon: Icons.trending_up,
                               color: const Color(0xFF2563EB)),
                           _MetricCard(
-                              label: 'Cost',
+                              label: AppStrings.t('cost'),
                               value: formatCurrency(_cost),
                               icon: Icons.shopping_bag_outlined,
                               color: const Color(0xFFEA580C)),
                           _MetricCard(
-                              label: 'Gross Profit',
+                              label: AppStrings.t('gross_profit'),
                               value: formatCurrency(_profit),
                               icon: Icons.savings_outlined,
                               color: const Color(0xFF1E6F5C)),
                           _MetricCard(
-                              label: 'Sales Count',
+                              label: AppStrings.t('sales_count'),
                               value: '$_salesCount',
                               icon: Icons.receipt_long_outlined,
                               color: const Color(0xFF7C3AED)),
                         ],
                       ),
                       const SizedBox(height: 28),
-                      _SectionHeader('Revenue over period'),
+                      _SectionHeader(AppStrings.t('revenue_over_period')),
                       const SizedBox(height: 12),
                       _ChartCard(child: SizedBox(height: 170, child: _TrendChart(data: _trend))),
                       const SizedBox(height: 28),
-                      _SectionHeader('Payment Mix'),
+                      _SectionHeader(AppStrings.t('payment_mix')),
                       const SizedBox(height: 12),
                       _ChartCard(child: SizedBox(height: 180, child: _PaymentMixChart(data: _paymentMix))),
                       const SizedBox(height: 28),
-                      _SectionHeader('Top Products'),
+                      _SectionHeader(AppStrings.t('top_products')),
                       const SizedBox(height: 12),
                       _ChartCard(
                         child: _topProducts.isEmpty
                             ? const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 16),
-                                child: Text('No sales in this period.'),
+                                child: Text(AppStrings.t('no_sales_in_period')),
                               )
                             : _RankedList(
                                 items: _topProducts
@@ -232,13 +233,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               ),
                       ),
                       const SizedBox(height: 28),
-                      _SectionHeader('By Category'),
+                      _SectionHeader(AppStrings.t('by_category')),
                       const SizedBox(height: 12),
                       _ChartCard(
                         child: _byCategory.isEmpty
                             ? const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 16),
-                                child: Text('No sales in this period.'),
+                                child: Text(AppStrings.t('no_sales_in_period')),
                               )
                             : _RankedList(
                                 items: _byCategory
@@ -249,13 +250,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               ),
                       ),
                       const SizedBox(height: 28),
-                      _SectionHeader('By Subcategory'),
+                      _SectionHeader(AppStrings.t('by_subcategory')),
                       const SizedBox(height: 12),
                       _ChartCard(
                         child: _bySubcategory.isEmpty
                             ? const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 16),
-                                child: Text('No sales in this period.'),
+                                child: Text(AppStrings.t('no_sales_in_period')),
                               )
                             : _RankedList(
                                 items: _bySubcategory
@@ -487,7 +488,7 @@ class _TrendChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (data.isEmpty) return const Center(child: Text('No sales in this period.'));
+    if (data.isEmpty) return Center(child: Text(AppStrings.t('no_sales_in_period')));
     const lineColor = Color(0xFF1E6F5C);
     final spots = <FlSpot>[];
     for (var i = 0; i < data.length; i++) {
@@ -554,7 +555,8 @@ class _PaymentMixChart extends StatelessWidget {
   final List<Map<String, dynamic>> data;
   const _PaymentMixChart({required this.data});
 
-  static const _labels = {'CASH': 'Cash', 'CREDIT': 'Full Credit', 'PARTIAL': 'Partial Credit'};
+  static Map<String, String> get _labels =>
+      {'CASH': AppStrings.t('cash'), 'CREDIT': AppStrings.t('full_credit'), 'PARTIAL': AppStrings.t('partial_credit')};
   static const _order = ['CASH', 'PARTIAL', 'CREDIT'];
   static const _colors = {
     'CASH': Color(0xFF16A34A),
@@ -566,7 +568,7 @@ class _PaymentMixChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final totalsByType = {for (final d in data) d['payment_type'] as String: (d['total'] as num).toDouble()};
     if (totalsByType.values.every((v) => v == 0) || totalsByType.isEmpty) {
-      return const Center(child: Text('No sales in this period.'));
+      return Center(child: Text(AppStrings.t('no_sales_in_period')));
     }
     final maxValue = totalsByType.values.fold<double>(0, (m, v) => v > m ? v : m);
     final bars = <BarChartGroupData>[];

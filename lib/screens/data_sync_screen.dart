@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../db/db_helper.dart';
 import '../utils/csv_helper.dart';
+import '../utils/app_strings.dart';
 
 class DataSyncScreen extends StatefulWidget {
   const DataSyncScreen({super.key});
@@ -292,93 +293,84 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Data Export & Import')),
+      appBar: AppBar(title: Text(AppStrings.t('data_export_import'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
             color: Colors.blue.shade50,
-            child: const Padding(
-              padding: EdgeInsets.all(14),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
               child: Text(
-                'This is for sharing data between two phones — it is not live syncing. '
-                'Each phone keeps its own copy of the data; export here and send the files '
-                'to the other phone, then import there to bring the changes in.',
-                style: TextStyle(fontSize: 12.5),
+                AppStrings.t('sync_explanation'),
+                style: const TextStyle(fontSize: 12.5),
               ),
             ),
           ),
           const SizedBox(height: 20),
-          Text('Export', style: Theme.of(context).textTheme.titleMedium),
+          Text(AppStrings.t('export'), style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          const Text(
-            'Creates a CSV file for every part of the app (products, vendors, suppliers, '
-            'sales, credit and supplier ledgers, stock history) and opens the share menu '
-            'so you can send them via WhatsApp, email, Google Drive, etc.',
-            style: TextStyle(fontSize: 12.5, color: Colors.black54),
+          Text(
+            AppStrings.t('export_explanation'),
+            style: const TextStyle(fontSize: 12.5, color: Colors.black54),
           ),
           const SizedBox(height: 10),
           FilledButton.icon(
             onPressed: _busy ? null : _exportAll,
             icon: const Icon(Icons.upload_file),
-            label: const Text('Export All Data (CSV)'),
+            label: Text(AppStrings.t('export_all_data')),
           ),
           const SizedBox(height: 28),
-          Text('Import', style: Theme.of(context).textTheme.titleMedium),
+          Text(AppStrings.t('import'), style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          const Text(
-            'Products, vendors, and suppliers update or add records by name. Vendor/supplier '
-            'credit history can also be imported — each row (date, name, type, amount, notes) '
-            'is replayed the same safe way as entering it by hand, so balances stay correct. '
-            'Sales themselves are still export-only, since importing one back would double-count '
-            'stock.',
-            style: TextStyle(fontSize: 12.5, color: Colors.black54),
+          Text(
+            AppStrings.t('import_explanation'),
+            style: const TextStyle(fontSize: 12.5, color: Colors.black54),
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: _busy ? null : _importProducts,
             icon: const Icon(Icons.inventory_2_outlined),
-            label: const Text('Import Products CSV'),
+            label: Text(AppStrings.t('import_products_csv')),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _busy ? null : _importVendors,
             icon: const Icon(Icons.people_outline),
-            label: const Text('Import Vendors CSV'),
+            label: Text(AppStrings.t('import_vendors_csv')),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _busy ? null : _importSuppliers,
             icon: const Icon(Icons.local_shipping_outlined),
-            label: const Text('Import Suppliers CSV'),
+            label: Text(AppStrings.t('import_suppliers_csv')),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _busy ? null : _importVendorCreditHistory,
             icon: const Icon(Icons.receipt_long_outlined),
-            label: const Text('Import Vendor Credit History CSV'),
+            label: Text(AppStrings.t('import_vendor_credit_history')),
           ),
           const SizedBox(height: 4),
           Padding(
             padding: const EdgeInsets.only(left: 4),
             child: Text(
-              'Columns: date, vendor_name, type (CREDIT or PAYMENT), amount, notes — '
-              'same shape as the exported credit_transactions.csv.',
-              style: TextStyle(fontSize: 11, color: Colors.black45),
+              AppStrings.t('vendor_credit_csv_columns'),
+              style: const TextStyle(fontSize: 11, color: Colors.black45),
             ),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(
             onPressed: _busy ? null : _importSupplierTransactionHistory,
             icon: const Icon(Icons.receipt_long_outlined),
-            label: const Text('Import Supplier Transaction History CSV'),
+            label: Text(AppStrings.t('import_supplier_txn_history')),
           ),
           const SizedBox(height: 4),
           Padding(
             padding: const EdgeInsets.only(left: 4),
             child: Text(
-              'Columns: date, supplier_name, type (PURCHASE or PAYMENT), amount, notes.',
-              style: TextStyle(fontSize: 11, color: Colors.black45),
+              AppStrings.t('supplier_txn_csv_columns'),
+              style: const TextStyle(fontSize: 11, color: Colors.black45),
             ),
           ),
           if (_busy) ...[

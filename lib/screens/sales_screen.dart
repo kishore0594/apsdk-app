@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
+import '../utils/app_strings.dart';
 
 // Units sold by weight/volume need decimal quantities (e.g. 0.75 Kgs).
 // Count-based units (Nos, Box, Dozen, Packet...) stay whole numbers.
@@ -49,16 +50,16 @@ class _SalesScreenState extends State<SalesScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Cancel this sale?'),
+        title: Text(AppStrings.t('cancel_sale_confirm')),
         content: const Text(
             'This restores the stock it used and reverses any credit posted to the vendor. '
             'The sale stays visible for the record, marked as cancelled.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No, keep it')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('no_keep_it'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Cancel Sale'),
+            child: Text(AppStrings.t('cancel_sale')),
           ),
         ],
       ),
@@ -69,7 +70,7 @@ class _SalesScreenState extends State<SalesScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not cancel sale: $e')));
+            .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_cancel_sale')}: $e")));
       }
       return;
     }
@@ -82,13 +83,13 @@ class _SalesScreenState extends State<SalesScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Modify this sale?'),
+        title: Text(AppStrings.t('modify_sale_confirm')),
         content: const Text(
             'This cancels the original sale (restoring stock and reversing any credit) and opens '
             'a new sale pre-filled with the same items, so you can adjust and re-enter it.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continue')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('continue_label'))),
         ],
       ),
     );
@@ -98,7 +99,7 @@ class _SalesScreenState extends State<SalesScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not modify sale: $e')));
+            .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_modify_sale')}: $e")));
       }
       return;
     }
@@ -135,12 +136,12 @@ class _SalesScreenState extends State<SalesScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.edit),
-              title: const Text('Modify'),
+              title: Text(AppStrings.t('modify')),
               onTap: () => Navigator.pop(context, 'modify'),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text('Delete (Cancel Sale)', style: TextStyle(color: Colors.red)),
+              title: Text(AppStrings.t('delete_cancel_sale'), style: const TextStyle(color: Colors.red)),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
@@ -172,12 +173,12 @@ class _SalesScreenState extends State<SalesScreen> {
             Row(
               children: [
                 Expanded(
-                  child: Text('Sale #${(sale['id'] as String).substring(0, 6)}',
+                  child: Text('${AppStrings.t('sale_hash')}${(sale['id'] as String).substring(0, 6)}',
                       style: Theme.of(context).textTheme.titleLarge),
                 ),
                 if (isCancelled)
                   const Chip(
-                    label: Text('CANCELLED', style: TextStyle(fontSize: 11, color: Colors.white)),
+                    label: Text(AppStrings.t('cancelled'), style: const TextStyle(fontSize: 11, color: Colors.white)),
                     backgroundColor: Colors.red,
                     visualDensity: VisualDensity.compact,
                   ),
@@ -192,11 +193,11 @@ class _SalesScreenState extends State<SalesScreen> {
                   trailing: Text(formatCurrency(i['subtotal'])),
                 )),
             const Divider(),
-            ListTile(title: const Text('Subtotal'), trailing: Text(formatCurrency(sale['subtotal']))),
+            ListTile(title: Text(AppStrings.t('subtotal')), trailing: Text(formatCurrency(sale['subtotal']))),
             if ((sale['discount'] as num) > 0)
-              ListTile(title: const Text('Discount'), trailing: Text('- ${formatCurrency(sale['discount'])}')),
+              ListTile(title: Text(AppStrings.t('discount')), trailing: Text('- ${formatCurrency(sale['discount'])}')),
             ListTile(
-              title: const Text('Total', style: TextStyle(fontWeight: FontWeight.bold)),
+              title: Text(AppStrings.t('total'), style: const TextStyle(fontWeight: FontWeight.bold)),
               trailing: Text(formatCurrency(sale['total_amount']),
                   style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
@@ -223,7 +224,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     child: OutlinedButton.icon(
                       onPressed: () => _modifySale(sale, items),
                       icon: const Icon(Icons.edit),
-                      label: const Text('Modify'),
+                      label: Text(AppStrings.t('modify')),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -232,7 +233,7 @@ class _SalesScreenState extends State<SalesScreen> {
                       style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
                       onPressed: () => _cancelSale(sale['id'] as String),
                       icon: const Icon(Icons.cancel_outlined),
-                      label: const Text('Cancel Sale'),
+                      label: Text(AppStrings.t('cancel_sale')),
                     ),
                   ),
                 ],
@@ -248,7 +249,7 @@ class _SalesScreenState extends State<SalesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Sales'),
+        title: Text(AppStrings.t('sales_title')),
         actions: [
           IconButton(
             icon: Icon(_todayOnly ? Icons.today : Icons.calendar_month),
@@ -264,7 +265,7 @@ class _SalesScreenState extends State<SalesScreen> {
             dateFilter: _todayOnly ? DateTime.now().toIso8601String().substring(0, 10) : null),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('Could not load sales: ${snapshot.error}'));
+            return Center(child: Text("${AppStrings.t('could_not_load_sales')}: ${snapshot.error}"));
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -288,8 +289,8 @@ class _SalesScreenState extends State<SalesScreen> {
               Theme(
                 data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
-                  title: const Text('Monthly Sales Trend', style: TextStyle(fontSize: 14)),
-                  subtitle: const Text('Last 30 days', style: TextStyle(fontSize: 11)),
+                  title: Text(AppStrings.t('monthly_sales_trend'), style: const TextStyle(fontSize: 14)),
+                  subtitle: Text(AppStrings.t('last_30_days'), style: const TextStyle(fontSize: 11)),
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -300,7 +301,7 @@ class _SalesScreenState extends State<SalesScreen> {
               ),
               Expanded(
                 child: sales.isEmpty
-                    ? const Center(child: Text('No sales recorded. Tap + to add a sale.'))
+                    ? Center(child: Text(AppStrings.t('no_sales_tap_add')))
                     : ListView.builder(
                         itemCount: sales.length,
                         itemBuilder: (_, i) {
@@ -333,7 +334,7 @@ class _SalesScreenState extends State<SalesScreen> {
                               ),
                               subtitle: Text(
                                 isCancelled
-                                    ? 'CANCELLED  •  ${formatDate(s['date'] as String)}'
+                                    ? "${AppStrings.t('cancelled')}  •  ${formatDate(s['date'] as String)}"
                                     : s['due_date'] != null
                                         ? '${formatDate(s['date'] as String)}\nDue ${formatDay(s['due_date'] as String)}'
                                         : formatDate(s['date'] as String),
@@ -492,18 +493,18 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Add Vendor (Credit Customer)'),
+        title: Text(AppStrings.t('add_vendor_credit_customer')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name'), autofocus: true),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
-            TextField(controller: placeCtrl, decoration: const InputDecoration(labelText: 'Place')),
+            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: AppStrings.t('name')), autofocus: true),
+            TextField(controller: phoneCtrl, decoration: InputDecoration(labelText: AppStrings.t('phone'))),
+            TextField(controller: placeCtrl, decoration: InputDecoration(labelText: AppStrings.t('place'))),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
       ),
     );
@@ -530,16 +531,16 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     final value = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Quantity ($unit)'),
+        title: Text('${AppStrings.t('quantity')} ($unit)'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Quantity'),
+          decoration: InputDecoration(labelText: AppStrings.t('quantity')),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, ctrl.text), child: const Text('Set')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, ctrl.text), child: Text(AppStrings.t('set_label'))),
         ],
       ),
     );
@@ -557,11 +558,11 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
 
   Future<void> _checkout() async {
     if (_cart.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add at least one item')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppStrings.t('add_at_least_one_item'))));
       return;
     }
     if (_paymentType != 'CASH' && _vendorId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a vendor for credit sales')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppStrings.t('select_vendor_credit'))));
       return;
     }
     final paid = _paymentType == 'CASH' ? _total : (double.tryParse(_paidCtrl.text) ?? 0);
@@ -586,7 +587,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not save sale: $e')));
+            .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save_sale')}: $e")));
       }
       return;
     }
@@ -598,11 +599,11 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.prefillItems != null ? 'Re-enter Sale' : 'New Sale'),
+        title: Text(widget.prefillItems != null ? AppStrings.t('re_enter_sale') : AppStrings.t('new_sale')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+            child: Text(AppStrings.t('cancel'), style: const TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -632,7 +633,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                           controller: controller,
                           focusNode: focusNode,
                           decoration: const InputDecoration(
-                            labelText: 'Type a product name to search',
+                            labelText: AppStrings.t('type_product_search'),
                             prefixIcon: Icon(Icons.search),
                           ),
                         );
@@ -693,10 +694,10 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Cart (${_cart.length})', style: Theme.of(context).textTheme.titleMedium),
+                  Text('${AppStrings.t('cart')} (${_cart.length})', style: Theme.of(context).textTheme.titleMedium),
                   Expanded(
                     child: _cart.isEmpty
-                        ? const Center(child: Text('Search a product above and tap it to add'))
+                        ? Center(child: Text(AppStrings.t('search_product_add')))
                         : ListView.builder(
                             itemCount: _cart.length,
                             itemBuilder: (_, i) {
@@ -745,7 +746,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                   const Divider(),
                   Row(
                     children: [
-                      const Text('Discount:'),
+                      Text('${AppStrings.t('discount')}:'),
                       const SizedBox(width: 8),
                       Expanded(
                         child: TextField(
@@ -758,14 +759,14 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text('Total: ${formatCurrency(_total)}',
+                  Text('${AppStrings.t('total')}: ${formatCurrency(_total)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 8),
                   SegmentedButton<String>(
                     segments: const [
-                      ButtonSegment(value: 'CASH', label: Text('Cash')),
-                      ButtonSegment(value: 'CREDIT', label: Text('Full Credit')),
-                      ButtonSegment(value: 'PARTIAL', label: Text('Partial')),
+                      ButtonSegment(value: 'CASH', label: Text(AppStrings.t('cash'))),
+                      ButtonSegment(value: 'CREDIT', label: Text(AppStrings.t('full_credit'))),
+                      ButtonSegment(value: 'PARTIAL', label: Text(AppStrings.t('partial'))),
                     ],
                     selected: {_paymentType},
                     onSelectionChanged: (s) => setState(() => _paymentType = s.first),
@@ -791,7 +792,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                       ),
                       const SizedBox(width: 8),
                       IconButton(
-                        tooltip: 'Add new vendor',
+                        tooltip: AppStrings.t('add_vendor'),
                         onPressed: _quickAddVendor,
                         icon: const Icon(Icons.person_add),
                       ),
@@ -801,7 +802,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                     const SizedBox(height: 8),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Payment due by (optional)', style: TextStyle(fontSize: 13)),
+                      title: Text(AppStrings.t('payment_due_by'), style: const TextStyle(fontSize: 13)),
                       subtitle: Text(_dueDate != null ? formatDay(_dueDate!.toIso8601String()) : 'Not set'),
                       trailing: Wrap(
                         spacing: 4,
@@ -833,7 +834,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                       controller: _paidCtrl,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(labelText: 'Amount collected now'),
+                      decoration: InputDecoration(labelText: AppStrings.t('amount_collected_now')),
                     ),
                     const SizedBox(height: 8),
                     Container(
@@ -850,7 +851,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  FilledButton(onPressed: _checkout, child: const Text('Complete Sale')),
+                  FilledButton(onPressed: _checkout, child: Text(AppStrings.t('complete_sale'))),
                 ],
               ),
             ),
@@ -868,7 +869,7 @@ class _MonthlyTrendChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) {
-      return const Center(child: Text('No sales recorded yet.'));
+      return Center(child: Text(AppStrings.t('no_sales_recorded_yet')));
     }
     final spots = <FlSpot>[];
     for (var i = 0; i < data.length; i++) {

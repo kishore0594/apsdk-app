@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
+import '../utils/app_strings.dart';
 import 'vendors_screen.dart';
 
 class VendorInsightsScreen extends StatefulWidget {
@@ -53,7 +54,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.scaffold,
-      appBar: AppBar(title: const Text('Vendor Insights')),
+      appBar: AppBar(title: Text(AppStrings.t('vendor_insights'))),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -65,7 +66,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                       children: [
                         Text(_error!, textAlign: TextAlign.center),
                         const SizedBox(height: 12),
-                        FilledButton(onPressed: _load, child: const Text('Retry')),
+                        FilledButton(onPressed: _load, child: Text(AppStrings.t('retry'))),
                       ],
                     ),
                   ),
@@ -79,7 +80,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                         children: [
                           Expanded(
                             child: _ViewChip(
-                              label: 'Location',
+                              label: AppStrings.t('location'),
                               icon: Icons.place_outlined,
                               selected: _view == _View.location,
                               onTap: () => setState(() => _view = _View.location),
@@ -88,7 +89,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: _ViewChip(
-                              label: 'Frequency',
+                              label: AppStrings.t('frequency'),
                               icon: Icons.repeat,
                               selected: _view == _View.frequency,
                               onTap: () => setState(() => _view = _View.frequency),
@@ -101,7 +102,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                         children: [
                           Expanded(
                             child: _ViewChip(
-                              label: 'Outstanding',
+                              label: AppStrings.t('outstanding'),
                               icon: Icons.account_balance_wallet_outlined,
                               selected: _view == _View.outstanding,
                               onTap: () => setState(() => _view = _View.outstanding),
@@ -110,7 +111,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: _ViewChip(
-                              label: 'Long Pending',
+                              label: AppStrings.t('long_pending'),
                               icon: Icons.hourglass_bottom,
                               selected: _view == _View.pending,
                               onTap: () => setState(() => _view = _View.pending),
@@ -134,17 +135,17 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   // ---------------- BY LOCATION ----------------
 
   Widget _byLocation() {
-    if (_vendors.isEmpty) return _emptyMessage('No vendors yet.');
+    if (_vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
     final groups = <String, List<Map<String, dynamic>>>{};
     for (final v in _vendors) {
       final place = (v['address'] as String? ?? '').trim();
-      final key = place.isEmpty ? 'No location set' : place;
+      final key = place.isEmpty ? AppStrings.t('no_location_set') : place;
       groups.putIfAbsent(key, () => []).add(v);
     }
     final sortedKeys = groups.keys.toList()
       ..sort((a, b) {
-        if (a == 'No location set') return 1;
-        if (b == 'No location set') return -1;
+        if (a == AppStrings.t('no_location_set')) return 1;
+        if (b == AppStrings.t('no_location_set')) return -1;
         return a.compareTo(b);
       });
 
@@ -179,7 +180,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   // ---------------- BY PURCHASE FREQUENCY ----------------
 
   Widget _byFrequency() {
-    if (_vendors.isEmpty) return _emptyMessage('No vendors yet.');
+    if (_vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
     final sorted = [..._vendors]
       ..sort((a, b) => (b['purchase_count'] as int).compareTo(a['purchase_count'] as int));
 
@@ -192,7 +193,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   // ---------------- BY OUTSTANDING AMOUNT ----------------
 
   Widget _byOutstanding() {
-    if (_vendors.isEmpty) return _emptyMessage('No vendors yet.');
+    if (_vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
     final sorted = [..._vendors]..sort((a, b) => (b['balance'] as num).compareTo(a['balance'] as num));
 
     return AppCard(
@@ -206,7 +207,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   Widget _longPending() {
     final pending = _vendors.where((v) => v['days_outstanding'] != null).toList();
     if (pending.isEmpty) {
-      return _emptyMessage('Nobody has an outstanding balance right now — nothing pending.');
+      return _emptyMessage(AppStrings.t('nobody_pending'));
     }
 
     final buckets = <String, List<Map<String, dynamic>>>{
@@ -248,7 +249,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
               child: ExpansionTile(
                 initiallyExpanded: entry.key == '90+ days' || entry.key == '61–90 days',
                 leading: IconBadge(icon: Icons.hourglass_bottom, color: color, size: 16),
-                title: Text(entry.key, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
+                title: Text(_bucketLabel(entry.key), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color)),
                 subtitle: Text(
                   '${entry.value.length} vendor${entry.value.length == 1 ? '' : 's'}  •  ${formatCurrency(total)}',
                   style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
@@ -273,11 +274,11 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
     String subtitle;
     if (showFrequency) {
       subtitle = purchaseCount == 0
-          ? 'No purchases yet'
+          ? AppStrings.t('no_purchases_yet')
           : '$purchaseCount purchase${purchaseCount == 1 ? '' : 's'}'
-              '${lastPurchase != null ? '  •  last ${formatDay(lastPurchase)}' : ''}';
+              "\${lastPurchase != null ? '  •  \${AppStrings.t('last_purchase')} \${formatDay(lastPurchase)}' : ''}";
     } else if (showDays && days != null) {
-      subtitle = 'Outstanding $days days';
+      subtitle = "\${AppStrings.t('outstanding_days')} $days \${AppStrings.t('days')}";
     } else {
       final place = (v['address'] as String? ?? '').trim();
       subtitle = place.isNotEmpty ? place : '$purchaseCount purchase${purchaseCount == 1 ? '' : 's'}';
@@ -295,6 +296,20 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
       ),
       onTap: () => _openVendor(v),
     );
+  }
+
+  /// Translates an internal (always-English) aging-bucket key to display
+  /// text — the keys themselves stay in English since they're used for
+  /// map lookups and the initiallyExpanded comparison, not just display.
+  String _bucketLabel(String key) {
+    const keyToTranslationKey = {
+      '90+ days': 'bucket_90_plus',
+      '61–90 days': 'bucket_61_90',
+      '31–60 days': 'bucket_31_60',
+      '0–30 days': 'bucket_0_30',
+    };
+    final translationKey = keyToTranslationKey[key];
+    return translationKey != null ? AppStrings.t(translationKey) : key;
   }
 
   Widget _emptyMessage(String message) => Padding(

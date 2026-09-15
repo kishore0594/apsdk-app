@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
+import '../utils/app_strings.dart';
 
 class SuppliersScreen extends StatefulWidget {
   const SuppliersScreen({super.key});
@@ -21,23 +22,23 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Add Supplier'),
+        title: Text(AppStrings.t('add_supplier')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
-            TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Address')),
+            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: AppStrings.t('name'))),
+            TextField(controller: phoneCtrl, decoration: InputDecoration(labelText: AppStrings.t('phone'))),
+            TextField(controller: addressCtrl, decoration: InputDecoration(labelText: AppStrings.t('address'))),
             TextField(
               controller: openingCtrl,
-              decoration: const InputDecoration(labelText: 'Opening balance owed to them'),
+              decoration: InputDecoration(labelText: AppStrings.t('opening_balance_owed_them')),
               keyboardType: TextInputType.number,
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
       ),
     );
@@ -62,18 +63,18 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Edit Supplier'),
+        title: Text(AppStrings.t('edit_supplier')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
-            TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Address')),
+            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: AppStrings.t('name'))),
+            TextField(controller: phoneCtrl, decoration: InputDecoration(labelText: AppStrings.t('phone'))),
+            TextField(controller: addressCtrl, decoration: InputDecoration(labelText: AppStrings.t('address'))),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
       ),
     );
@@ -87,7 +88,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save')}: $e")));
       }
     }
   }
@@ -97,7 +98,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Delete ${supplier['name']}?'),
+        title: Text("${AppStrings.t('delete')} ${supplier['name']}?"),
         content: Text(
           balance > 0
               ? 'You still owe this supplier ${formatCurrency(balance)}. Deleting them removes '
@@ -107,11 +108,11 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
               : 'This can\'t be undone. Their past transaction records stay in your data exports.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(AppStrings.t('delete')),
           ),
         ],
       ),
@@ -121,7 +122,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
       await _db.deleteSupplier(supplier['id'] as String);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_delete')}: $e")));
       }
     }
   }
@@ -129,12 +130,12 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Suppliers')),
+      appBar: AppBar(title: Text(AppStrings.t('suppliers_title'))),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _db.watchSuppliers(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('Could not load suppliers: ${snapshot.error}'));
+            return Center(child: Text("${AppStrings.t('could_not_load_suppliers')}: ${snapshot.error}"));
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -149,12 +150,12 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 color: Theme.of(context).colorScheme.primaryContainer,
-                child: Text('Total Owed to Suppliers: ${formatCurrency(totalOwed)}',
+                child: Text("${AppStrings.t('total_owed_suppliers')}: ${formatCurrency(totalOwed)}",
                     style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
               Expanded(
                 child: suppliers.isEmpty
-                    ? const Center(child: Text('No suppliers yet. Tap + to add one.'))
+                    ? Center(child: Text(AppStrings.t('no_suppliers_tap_add')))
                     : ListView.builder(
                         itemCount: suppliers.length,
                         itemBuilder: (_, i) {
@@ -192,7 +193,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                                         value: 'edit',
                                         child: ListTile(
                                           leading: Icon(Icons.edit_outlined),
-                                          title: Text('Edit'),
+                                          title: Text(AppStrings.t('edit')),
                                           contentPadding: EdgeInsets.zero,
                                         ),
                                       ),
@@ -200,7 +201,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                                         value: 'delete',
                                         child: ListTile(
                                           leading: Icon(Icons.delete_outline, color: Colors.red),
-                                          title: Text('Delete', style: TextStyle(color: Colors.red)),
+                                          title: Text(AppStrings.t('delete'), style: const TextStyle(color: Colors.red)),
                                           contentPadding: EdgeInsets.zero,
                                         ),
                                       ),
@@ -245,25 +246,25 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Record Payment Made'),
+        title: Text(AppStrings.t('record_payment_made')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount'),
+              decoration: InputDecoration(labelText: AppStrings.t('amount')),
               autofocus: true,
             ),
             TextField(
               controller: notesCtrl,
-              decoration: const InputDecoration(labelText: 'Notes (optional)'),
+              decoration: InputDecoration(labelText: AppStrings.t('notes_optional')),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
       ),
     );
@@ -306,7 +307,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                 color: balance > 0 ? Colors.red.shade50 : Colors.green.shade50,
                 child: Column(
                   children: [
-                    const Text('Amount Owed to Supplier'),
+                    Text(AppStrings.t('amount_owed_supplier')),
                     Text(
                       formatCurrency(balance),
                       style: TextStyle(
@@ -326,7 +327,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                       child: OutlinedButton.icon(
                         onPressed: _openNewPurchase,
                         icon: const Icon(Icons.local_shipping),
-                        label: const Text('New Purchase'),
+                        label: Text(AppStrings.t('new_purchase')),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -334,7 +335,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                       child: FilledButton.icon(
                         onPressed: _recordPayment,
                         icon: const Icon(Icons.payments),
-                        label: const Text('Pay Supplier'),
+                        label: Text(AppStrings.t('pay_supplier')),
                       ),
                     ),
                   ],
@@ -345,7 +346,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('Transaction History', style: Theme.of(context).textTheme.titleMedium),
+                  child: Text(AppStrings.t('transaction_history'), style: Theme.of(context).textTheme.titleMedium),
                 ),
               ),
               Expanded(
@@ -353,14 +354,14 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   stream: _db.watchSupplierTransactions(supplierId),
                   builder: (context, txnSnap) {
                     if (txnSnap.hasError) {
-                      return Center(child: Text('Could not load history: ${txnSnap.error}'));
+                      return Center(child: Text("${AppStrings.t('could_not_load_history')}: ${txnSnap.error}"));
                     }
                     if (!txnSnap.hasData) {
                       return const Center(child: CircularProgressIndicator());
                     }
                     final transactions = txnSnap.data!;
                     if (transactions.isEmpty) {
-                      return const Center(child: Text('No transactions yet.'));
+                      return Center(child: Text(AppStrings.t('no_transactions_yet')));
                     }
                     return ListView.builder(
                       itemCount: transactions.length,
@@ -390,9 +391,9 @@ class _SupplierTxnTile extends StatelessWidget {
       isPurchase ? Icons.arrow_upward : Icons.arrow_downward,
       color: isPurchase ? Colors.red : Colors.green,
     );
-    final titleText = Text('${isPurchase ? 'Purchase' : 'Payment made'}: ${formatCurrency(txn['amount'])}');
+    final titleText = Text("${isPurchase ? AppStrings.t('purchase') : AppStrings.t('payment_made')}: ${formatCurrency(txn['amount'])}");
     final balanceText =
-        Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12));
+        Text("${AppStrings.t('balance_abbr')}: ${formatCurrency(txn['balance_after'])}", style: const TextStyle(fontSize: 12));
 
     if (!isPurchase) {
       return ListTile(
@@ -409,7 +410,7 @@ class _SupplierTxnTile extends StatelessWidget {
     return ExpansionTile(
       leading: leadingIcon,
       title: titleText,
-      subtitle: Text('${formatDate(txn['date'] as String)} • tap to view products'),
+      subtitle: Text("${formatDate(txn['date'] as String)} • ${AppStrings.t('tap_view_products')}"),
       trailing: balanceText,
       children: [
         FutureBuilder<List<Map<String, dynamic>>>(
@@ -422,7 +423,7 @@ class _SupplierTxnTile extends StatelessWidget {
             if (items.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('No product details recorded for this purchase.'),
+                child: Text(AppStrings.t('no_product_details_purchase')),
               );
             }
             return Column(
@@ -488,7 +489,7 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
 
   Future<void> _save() async {
     if (_lines.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add at least one product')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppStrings.t('add_at_least_one_product'))));
       return;
     }
     await _db.addSupplierPurchase(
@@ -519,9 +520,9 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('New Purchase', style: Theme.of(context).textTheme.titleLarge),
+              Text(AppStrings.t('new_purchase'), style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 10),
-              const Text('Tap a product to add it, then set quantity and cost per unit.',
+              Text(AppStrings.t('tap_product_add_qty'),
                   style: TextStyle(fontSize: 12, color: Colors.black54)),
               const SizedBox(height: 8),
               Expanded(
@@ -538,12 +539,12 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
                           ),
                         )),
                     const Divider(),
-                    Text('Purchase items (${_lines.length})',
+                    Text('${AppStrings.t('purchase_items')} (${_lines.length})',
                         style: Theme.of(context).textTheme.titleSmall),
                     if (_lines.isEmpty)
                       const Padding(
                         padding: EdgeInsets.all(12),
-                        child: Text('No products added yet.'),
+                        child: Text(AppStrings.t('no_products_added_yet')),
                       )
                     else
                       ..._lines.map((l) => Padding(
@@ -556,7 +557,7 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
                                   child: TextFormField(
                                     key: ValueKey('qty-${l.product['id']}'),
                                     initialValue: l.quantity.toString(),
-                                    decoration: InputDecoration(labelText: 'Qty (${l.product['unit']})', isDense: true),
+                                    decoration: InputDecoration(labelText: "${AppStrings.t('qty')} (${l.product['unit']})", isDense: true),
                                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                     onChanged: (v) => setState(() => l.quantity = double.tryParse(v) ?? l.quantity),
                                   ),
@@ -567,7 +568,7 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
                                   child: TextFormField(
                                     key: ValueKey('cost-${l.product['id']}'),
                                     initialValue: l.unitCost.toString(),
-                                    decoration: const InputDecoration(labelText: 'Cost/unit', isDense: true),
+                                    decoration: InputDecoration(labelText: AppStrings.t('cost_per_unit'), isDense: true),
                                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                     onChanged: (v) => setState(() => l.unitCost = double.tryParse(v) ?? l.unitCost),
                                   ),
@@ -585,17 +586,17 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
               const Divider(),
               TextField(
                 controller: _notesCtrl,
-                decoration: const InputDecoration(labelText: 'Notes (invoice no. etc.)'),
+                decoration: InputDecoration(labelText: AppStrings.t('notes_invoice')),
               ),
               const SizedBox(height: 8),
-              Text('Total: ${formatCurrency(_total)}',
+              Text('${AppStrings.t('total')}: ${formatCurrency(_total)}',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 8),
-              FilledButton(onPressed: _save, child: const Text('Save Purchase')),
+              FilledButton(onPressed: _save, child: Text(AppStrings.t('save_purchase'))),
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
+                child: Text(AppStrings.t('cancel')),
               ),
             ],
           ),

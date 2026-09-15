@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
+import '../utils/app_strings.dart';
 import 'vendor_insights_screen.dart';
 
 class VendorsScreen extends StatefulWidget {
@@ -34,23 +35,23 @@ class _VendorsScreenState extends State<VendorsScreen> {
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Add Vendor (Credit Customer)'),
+          title: Text(AppStrings.t('add_vendor_credit_customer')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
-                TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
-                TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Place')),
+                TextField(controller: nameCtrl, decoration: InputDecoration(labelText: AppStrings.t('name'))),
+                TextField(controller: phoneCtrl, decoration: InputDecoration(labelText: AppStrings.t('phone'))),
+                TextField(controller: addressCtrl, decoration: InputDecoration(labelText: AppStrings.t('place'))),
                 TextField(
                   controller: openingCtrl,
-                  decoration: const InputDecoration(labelText: 'Opening balance owed'),
+                  decoration: InputDecoration(labelText: AppStrings.t('opening_balance_owed')),
                   keyboardType: TextInputType.number,
                 ),
                 const SizedBox(height: 8),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Credit given on', style: TextStyle(fontSize: 13)),
+                  title: Text(AppStrings.t('credit_given_on'), style: const TextStyle(fontSize: 13)),
                   subtitle: Text(formatDay(creditDate.toIso8601String())),
                   trailing: const Icon(Icons.calendar_today, size: 18),
                   onTap: () async {
@@ -72,8 +73,8 @@ class _VendorsScreenState extends State<VendorsScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
           ],
         ),
       ),
@@ -108,16 +109,16 @@ class _VendorsScreenState extends State<VendorsScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Collect Payment — $vendorName'),
+        title: Text('${AppStrings.t('collect_payment')} — $vendorName'),
         content: TextField(
           controller: amountCtrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: 'Amount'),
+          decoration: InputDecoration(labelText: AppStrings.t('amount')),
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
       ),
     );
@@ -128,7 +129,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not record payment: $e')));
+            .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_record_payment')}: $e")));
       }
     }
   }
@@ -141,18 +142,18 @@ class _VendorsScreenState extends State<VendorsScreen> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Edit Vendor'),
+        title: Text(AppStrings.t('edit_vendor')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
-            TextField(controller: addressCtrl, decoration: const InputDecoration(labelText: 'Place')),
+            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: AppStrings.t('name'))),
+            TextField(controller: phoneCtrl, decoration: InputDecoration(labelText: AppStrings.t('phone'))),
+            TextField(controller: addressCtrl, decoration: InputDecoration(labelText: AppStrings.t('place'))),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
       ),
     );
@@ -166,7 +167,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save')}: $e")));
       }
     }
   }
@@ -176,7 +177,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Delete ${vendor['name']}?'),
+        title: Text("${AppStrings.t('delete')} ${vendor['name']}?"),
         content: Text(
           balance > 0
               ? 'This vendor still has an outstanding balance of ${formatCurrency(balance)}. '
@@ -186,11 +187,11 @@ class _VendorsScreenState extends State<VendorsScreen> {
               : 'This can\'t be undone. Their past transaction records stay in your data exports.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(AppStrings.t('delete')),
           ),
         ],
       ),
@@ -200,7 +201,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
       await _db.deleteVendor(vendor['id'] as String);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_delete')}: $e")));
       }
     }
   }
@@ -209,7 +210,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Vendor Credit'),
+        title: Text(AppStrings.t('vendor_credit')),
         actions: [
           IconButton(
             tooltip: 'Vendor Insights',
@@ -251,7 +252,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                         action: FilledButton.icon(
                           onPressed: _addVendor,
                           icon: const Icon(Icons.person_add, size: 18),
-                          label: const Text('Add Vendor'),
+                          label: Text(AppStrings.t('add_vendor')),
                         ),
                       )
                     : ListView.builder(
@@ -310,7 +311,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                       Column(
                                         crossAxisAlignment: CrossAxisAlignment.end,
                                         children: [
-                                          Text('Outstanding',
+                                          Text(AppStrings.t('outstanding'),
                                               style: TextStyle(
                                                   fontSize: 10.5, color: Colors.grey.shade600)),
                                           const SizedBox(height: 1),
@@ -339,7 +340,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                             value: 'edit',
                                             child: ListTile(
                                               leading: Icon(Icons.edit_outlined),
-                                              title: Text('Edit'),
+                                              title: Text(AppStrings.t('edit')),
                                               contentPadding: EdgeInsets.zero,
                                             ),
                                           ),
@@ -347,7 +348,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                             value: 'delete',
                                             child: ListTile(
                                               leading: Icon(Icons.delete_outline, color: AppTheme.danger),
-                                              title: Text('Delete', style: TextStyle(color: AppTheme.danger)),
+                                              title: Text(AppStrings.t('delete'), style: const TextStyle(color: AppTheme.danger)),
                                               contentPadding: EdgeInsets.zero,
                                             ),
                                           ),
@@ -367,7 +368,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                                   builder: (_) => VendorDetailScreen(vendor: v)),
                                             ),
                                             icon: const Icon(Icons.menu_book_outlined, size: 16),
-                                            label: const Text('Ledger'),
+                                            label: Text(AppStrings.t('ledger')),
                                             style: OutlinedButton.styleFrom(
                                               padding: const EdgeInsets.symmetric(vertical: 10),
                                             ),
@@ -379,7 +380,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                             onPressed: () => _quickCollectPayment(
                                                 v['id'] as String, v['name'] as String),
                                             icon: const Icon(Icons.payments_outlined, size: 16),
-                                            label: const Text('Payment'),
+                                            label: Text(AppStrings.t('payment')),
                                             style: FilledButton.styleFrom(
                                               padding: const EdgeInsets.symmetric(vertical: 10),
                                             ),
@@ -402,7 +403,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _addVendor,
         icon: const Icon(Icons.person_add),
-        label: const Text('Add Vendor'),
+        label: Text(AppStrings.t('add_vendor')),
       ),
     );
   }
@@ -436,14 +437,14 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                 TextField(
                   controller: amountCtrl,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'Amount'),
+                  decoration: InputDecoration(labelText: AppStrings.t('amount')),
                   autofocus: true,
                 ),
-                TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notes (optional)')),
+                TextField(controller: notesCtrl, decoration: InputDecoration(labelText: AppStrings.t('notes_optional'))),
                 const SizedBox(height: 8),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Date', style: TextStyle(fontSize: 13)),
+                  title: Text(AppStrings.t('date'), style: const TextStyle(fontSize: 13)),
                   subtitle: Text(formatDay(txnDate.toIso8601String())),
                   trailing: const Icon(Icons.calendar_today, size: 18),
                   onTap: () async {
@@ -466,8 +467,8 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
           ],
         ),
       ),
@@ -519,7 +520,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                           style: const TextStyle(color: Colors.black54, fontSize: 12),
                         ),
                       ),
-                    const Text('Current Balance'),
+                    Text(AppStrings.t('current_balance')),
                     Text(
                       formatCurrency(balance),
                       style: TextStyle(
@@ -539,7 +540,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                       child: OutlinedButton.icon(
                         onPressed: () => _recordTransaction('CREDIT'),
                         icon: const Icon(Icons.add),
-                        label: const Text('Add Credit'),
+                        label: Text(AppStrings.t('add_credit')),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -547,7 +548,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                       child: FilledButton.icon(
                         onPressed: () => _recordTransaction('PAYMENT'),
                         icon: const Icon(Icons.payments),
-                        label: const Text('Collect Payment'),
+                        label: Text(AppStrings.t('collect_payment')),
                       ),
                     ),
                   ],
@@ -558,7 +559,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('Transaction History', style: Theme.of(context).textTheme.titleMedium),
+                  child: Text(AppStrings.t('transaction_history'), style: Theme.of(context).textTheme.titleMedium),
                 ),
               ),
               Expanded(
@@ -566,14 +567,14 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                   stream: _db.watchVendorTransactions(vendorId),
                   builder: (context, txnSnap) {
                     if (txnSnap.hasError) {
-                      return Center(child: Text('Could not load history: ${txnSnap.error}'));
+                      return Center(child: Text("${AppStrings.t('could_not_load_history')}: ${txnSnap.error}"));
                     }
                     if (!txnSnap.hasData) {
                       return const Center(child: CircularProgressIndicator());
                     }
                     final transactions = txnSnap.data!;
                     if (transactions.isEmpty) {
-                      return const Center(child: Text('No transactions yet.'));
+                      return Center(child: Text(AppStrings.t('no_transactions_yet')));
                     }
                     return ListView.builder(
                       itemCount: transactions.length,
@@ -604,9 +605,9 @@ class _TransactionTile extends StatelessWidget {
       color: isCredit ? Colors.red : Colors.green,
     );
     final titleText =
-        Text('${isCredit ? 'Credit given' : 'Payment received'}: ${formatCurrency(txn['amount'])}');
+        Text("${isCredit ? AppStrings.t('credit_given') : AppStrings.t('payment_received')}: ${formatCurrency(txn['amount'])}");
     final balanceText =
-        Text('Bal: ${formatCurrency(txn['balance_after'])}', style: const TextStyle(fontSize: 12));
+        Text("${AppStrings.t('balance_abbr')}: ${formatCurrency(txn['balance_after'])}", style: const TextStyle(fontSize: 12));
 
     if (saleId == null) {
       return ListTile(
@@ -640,7 +641,7 @@ class _TransactionTile extends StatelessWidget {
             if (items.isEmpty) {
               return const Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('No item details recorded for this sale.'),
+                child: Text(AppStrings.t('no_item_details')),
               );
             }
             return Column(

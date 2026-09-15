@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
+import '../utils/app_strings.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -104,7 +105,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               const Divider(),
               Expanded(
                 child: history.isEmpty
-                    ? const Center(child: Text('No movements recorded yet.'))
+                    ? Center(child: Text(AppStrings.t('no_movements_yet')))
                     : ListView.builder(
                         controller: scrollController,
                         itemCount: history.length,
@@ -132,12 +133,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Inventory')),
+      appBar: AppBar(title: Text(AppStrings.t('inventory_title'))),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _productsStream,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('Could not load inventory: ${snapshot.error}'));
+            return Center(child: Text("${AppStrings.t('could_not_load_inventory')}: ${snapshot.error}"));
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -195,7 +196,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 padding: const EdgeInsets.all(12),
                 child: TextField(
                   decoration: const InputDecoration(
-                    labelText: 'Search products',
+                    labelText: AppStrings.t('search_products'),
                     prefixIcon: Icon(Icons.search),
                   ),
                   onChanged: (v) => setState(() => _search = v),
@@ -203,7 +204,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               ),
               Expanded(
                 child: filtered.isEmpty
-                    ? const Center(child: Text('No products yet. Tap + to add one.'))
+                    ? Center(child: Text(AppStrings.t('no_products_tap_add')))
                     : ListView.builder(
                         itemCount: filtered.length,
                         itemBuilder: (_, i) {
@@ -225,7 +226,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                           color: low ? Colors.red : Colors.black87,
                                           fontWeight: FontWeight.bold)),
                                   if (low)
-                                    const Text('Low stock',
+                                    Text(AppStrings.t('low_stock'),
                                         style: TextStyle(color: Colors.red, fontSize: 11)),
                                 ],
                               ),
@@ -301,17 +302,17 @@ class _ProductFormState extends State<_ProductForm> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('New Supplier'),
+        title: Text(AppStrings.t('new_supplier')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Name'), autofocus: true),
-            TextField(controller: phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
+            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: AppStrings.t('name')), autofocus: true),
+            TextField(controller: phoneCtrl, decoration: InputDecoration(labelText: AppStrings.t('phone'))),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
       ),
     );
@@ -377,18 +378,18 @@ class _ProductFormState extends State<_ProductForm> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'Product name'),
+                decoration: InputDecoration(labelText: AppStrings.t('product_name')),
                 validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _category,
-                decoration: const InputDecoration(labelText: 'Category'),
+                decoration: InputDecoration(labelText: AppStrings.t('category')),
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _subcategory,
-                decoration: const InputDecoration(labelText: 'Sub-category'),
+                decoration: InputDecoration(labelText: AppStrings.t('sub_category')),
               ),
               const SizedBox(height: 12),
               Row(
@@ -396,7 +397,7 @@ class _ProductFormState extends State<_ProductForm> {
                   Expanded(
                     child: DropdownButtonFormField<String>(
                       value: _unit,
-                      decoration: const InputDecoration(labelText: 'Unit'),
+                      decoration: InputDecoration(labelText: AppStrings.t('unit')),
                       items: _unitOptions
                           .map((u) => DropdownMenuItem(value: u, child: Text(u)))
                           .toList(),
@@ -407,7 +408,7 @@ class _ProductFormState extends State<_ProductForm> {
                   Expanded(
                     child: TextFormField(
                       controller: _quantity,
-                      decoration: const InputDecoration(labelText: 'Current quantity'),
+                      decoration: InputDecoration(labelText: AppStrings.t('current_quantity')),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     ),
                   ),
@@ -416,7 +417,7 @@ class _ProductFormState extends State<_ProductForm> {
               const SizedBox(height: 12),
               TextFormField(
                 controller: _reorderLevel,
-                decoration: const InputDecoration(labelText: 'Reorder level (low stock alert)'),
+                decoration: InputDecoration(labelText: AppStrings.t('reorder_level')),
                 keyboardType: TextInputType.number,
               ),
               const SizedBox(height: 12),
@@ -425,7 +426,7 @@ class _ProductFormState extends State<_ProductForm> {
                   Expanded(
                     child: TextFormField(
                       controller: _costPrice,
-                      decoration: const InputDecoration(labelText: 'Cost price'),
+                      decoration: InputDecoration(labelText: AppStrings.t('cost_price')),
                       keyboardType: TextInputType.number,
                     ),
                   ),
@@ -433,7 +434,7 @@ class _ProductFormState extends State<_ProductForm> {
                   Expanded(
                     child: TextFormField(
                       controller: _sellingPrice,
-                      decoration: const InputDecoration(labelText: 'Selling price'),
+                      decoration: InputDecoration(labelText: AppStrings.t('selling_price')),
                       keyboardType: TextInputType.number,
                       validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                     ),
@@ -447,7 +448,7 @@ class _ProductFormState extends State<_ProductForm> {
                   Expanded(
                     child: DropdownButtonFormField<String>(
                       value: _supplierId,
-                      decoration: const InputDecoration(labelText: 'Supplier (optional)'),
+                      decoration: InputDecoration(labelText: AppStrings.t('supplier_optional')),
                       items: _suppliers
                           .map((s) => DropdownMenuItem(value: s['id'] as String, child: Text(s['name'] as String)))
                           .toList(),
@@ -463,18 +464,18 @@ class _ProductFormState extends State<_ProductForm> {
                 ],
               ),
               const SizedBox(height: 20),
-              FilledButton(onPressed: _save, child: const Text('Save Product')),
+              FilledButton(onPressed: _save, child: Text(AppStrings.t('save_product'))),
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
+                child: Text(AppStrings.t('cancel')),
               ),
               if (widget.product != null) ...[
                 const SizedBox(height: 8),
                 OutlinedButton(
                   onPressed: _delete,
                   style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-                  child: const Text('Delete Product'),
+                  child: Text(AppStrings.t('delete_product')),
                 ),
               ],
             ],
