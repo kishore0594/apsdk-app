@@ -30,6 +30,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> _topProducts = [];
   List<Map<String, dynamic>> _byCategory = [];
   List<Map<String, dynamic>> _bySubcategory = [];
+  List<Map<String, dynamic>> _creditTrend = [];
 
   @override
   void initState() {
@@ -88,6 +89,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _db.getProductWiseSales(startIso: start, endIsoExclusive: end),
         _db.getCategoryWiseSales(startIso: start, endIsoExclusive: end),
         _db.getSubcategoryWiseSales(startIso: start, endIsoExclusive: end),
+        _db.getCreditTrend(startIso: start, endIsoExclusive: end),
       ]);
       final summary = results[0] as Map<String, dynamic>;
       setState(() {
@@ -100,6 +102,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _topProducts = (results[3] as List<Map<String, dynamic>>).take(5).toList();
         _byCategory = results[4] as List<Map<String, dynamic>>;
         _bySubcategory = results[5] as List<Map<String, dynamic>>;
+        _creditTrend = results[6] as List<Map<String, dynamic>>;
         _loading = false;
       });
     } catch (e) {
@@ -211,6 +214,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       _SectionHeader(AppStrings.t('revenue_over_period')),
                       const SizedBox(height: 12),
                       _ChartCard(child: SizedBox(height: 170, child: _TrendChart(data: _trend))),
+                      const SizedBox(height: 28),
+                      _SectionHeader(AppStrings.t('credit_trend'), subtitle: AppStrings.t('credit_trend_caption')),
+                      const SizedBox(height: 12),
+                      _ChartCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_creditTrend.isNotEmpty) _CreditTrendSummary(data: _creditTrend),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              height: 150,
+                              child: _TrendChart(
+                                data: _creditTrend,
+                                color: const Color(0xFFDC2626),
+                                dateKey: 'date',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 28),
                       _SectionHeader(AppStrings.t('payment_mix')),
                       const SizedBox(height: 12),
@@ -342,11 +365,22 @@ class _PeriodPill extends StatelessWidget {
 
 class _SectionHeader extends StatelessWidget {
   final String title;
-  const _SectionHeader(this.title);
+  final String? subtitle;
+  const _SectionHeader(this.title, {this.subtitle});
 
   @override
   Widget build(BuildContext context) {
-    return Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        if (subtitle != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(subtitle!, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+          ),
+      ],
+    );
   }
 }
 
@@ -484,12 +518,14 @@ class _RankedList extends StatelessWidget {
 
 class _TrendChart extends StatelessWidget {
   final List<Map<String, dynamic>> data;
-  const _TrendChart({required this.data});
+  final Color color;
+  final String dateKey;
+  const _TrendChart({required this.data, this.color = const Color(0xFF1E6F5C), this.dateKey = 'day'});
 
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return Center(child: Text(AppStrings.t('no_sales_in_period')));
-    const lineColor = Color(0xFF1E6F5C);
+    final lineColor = color;
     final spots = <FlSpot>[];
     for (var i = 0; i < data.length; i++) {
       spots.add(FlSpot(i.toDouble(), (data[i]['total'] as num?)?.toDouble() ?? 0));
@@ -514,7 +550,7 @@ class _TrendChart extends StatelessWidget {
               getTitlesWidget: (value, meta) {
                 final i = value.toInt();
                 if (i < 0 || i >= data.length) return const SizedBox.shrink();
-                final day = data[i]['day'] as String? ?? '';
+                final day = data[i][dateKey] as String? ?? '';
                 final label = day.length >= 10 ? day.substring(8, 10) : day;
                 return Padding(
                   padding: const EdgeInsets.only(top: 6),
@@ -547,6 +583,65 @@ class _TrendChart extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Starting balance, current balance, and the net change between them —
+/// sits above the credit trend chart so the headline number (is it going
+/// up or down, and by how much) doesn't require reading the chart shape.
+class _CreditTrendSummary extends StatelessWidget {
+  final List<Map<String, dynamic>> data;
+  const _CreditTrendSummary({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final start = (data.first['total'] as num).toDouble();
+    final end = (data.last['total'] as num).toDouble();
+    final change = end - start;
+    final isUp = change > 0.01;
+    final isDown = change < -0.01;
+    final changeColor = isUp ? const Color(0xFFDC2626) : (isDown ? const Color(0xFF16A34A) : Colors.grey);
+    final changeLabel = isUp
+        ? AppStrings.t('increased_by')
+        : (isDown ? AppStrings.t('decreased_by') : AppStrings.t('no_change'));
+
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(AppStrings.t('starting_balance'), style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+              Text(formatCurrency(start), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        Icon(
+          isUp ? Icons.trending_up : (isDown ? Icons.trending_down : Icons.trending_flat),
+          color: changeColor,
+        ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(AppStrings.t('ending_balance'), style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+              Text(formatCurrency(end), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(changeLabel, style: TextStyle(fontSize: 11, color: changeColor)),
+            Text(
+              (change.abs() < 0.01) ? '—' : formatCurrency(change.abs()),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: changeColor),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

@@ -488,6 +488,53 @@ class DBHelper {
     return total;
   }
 
+  /// Day-by-day total outstanding credit (summed across every vendor) for
+  /// the given period — feeds the "Credit Trend" chart on Reports &
+  /// Trends. Unlike the vendor's own balance_after field (which reflects
+  /// just that one vendor), this reconstructs the store-wide total at
+  /// each point in time by replaying every CREDIT/PAYMENT/ADJUSTMENT
+  /// transaction across all vendors in chronological order. A day with no
+  /// transactions carries forward the previous day's total, since the
+  /// total only changes when something is recorded.
+  Future<List<Map<String, dynamic>>> getCreditTrend({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    // Needs the FULL history up to the period's end, not just the period
+    // itself, to correctly compute the starting balance the period opens
+    // with (otherwise day one of the chart would wrongly start at zero).
+    final snap = await _creditTxns.where('date', isLessThan: endIsoExclusive).get();
+    final all = _fromSnapshot(snap);
+    all.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+
+    double running = 0;
+    final closingBalanceByDay = <String, double>{};
+    for (final txn in all) {
+      final type = txn['type'] as String;
+      final amount = (txn['amount'] as num).toDouble();
+      running += (type == 'CREDIT') ? amount : -amount; // PAYMENT and ADJUSTMENT both reduce it
+      final day = (txn['date'] as String).substring(0, 10);
+      closingBalanceByDay[day] = running; // last write per day wins == that day's closing balance
+    }
+
+    final startDate = DateTime.parse(startIso);
+    final endDate = DateTime.parse(endIsoExclusive).subtract(const Duration(days: 1));
+
+    // Carry-forward baseline: the latest closing balance strictly before
+    // the period starts.
+    final startKey = startIso.substring(0, 10);
+    final priorDays = closingBalanceByDay.keys.where((d) => d.compareTo(startKey) < 0).toList()..sort();
+    double carry = priorDays.isEmpty ? 0 : closingBalanceByDay[priorDays.last]!;
+
+    final result = <Map<String, dynamic>>[];
+    for (var d = startDate; !d.isAfter(endDate); d = d.add(const Duration(days: 1))) {
+      final key = d.toIso8601String().substring(0, 10);
+      if (closingBalanceByDay.containsKey(key)) carry = closingBalanceByDay[key]!;
+      result.add({'date': key, 'total': carry});
+    }
+    return result;
+  }
+
   /// For a vendor with an outstanding balance, returns how many days ago
   /// their *current, still-unpaid* balance started accumulating. Walks
   /// their transaction history oldest-to-newest; every time the running
