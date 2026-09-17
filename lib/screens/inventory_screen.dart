@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
+import '../utils/app_theme.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -145,9 +146,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
           }
           final products = snapshot.data!;
           final filtered = _filteredProducts(products);
+          final lowStockCount = products.where((p) {
+            final qty = (p['quantity'] as num).toDouble();
+            final reorder = (p['reorder_level'] as num).toDouble();
+            return qty <= reorder;
+          }).length;
 
           return Column(
             children: [
+              SummaryBanner(
+                icon: Icons.inventory_2_outlined,
+                label: AppStrings.t('inventory_title'),
+                value: '${products.length}',
+                color: lowStockCount > 0 ? AppTheme.warning : AppTheme.profit,
+                caption: lowStockCount > 0 ? '$lowStockCount ${AppStrings.t('low_stock')}' : null,
+              ),
+              const SizedBox(height: 6),
               SizedBox(
                 height: 44,
                 child: ListView(
@@ -204,34 +218,58 @@ class _InventoryScreenState extends State<InventoryScreen> {
               ),
               Expanded(
                 child: filtered.isEmpty
-                    ? Center(child: Text(AppStrings.t('no_products_tap_add')))
+                    ? EmptyState(icon: Icons.inventory_2_outlined, title: AppStrings.t('no_products_tap_add'))
                     : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 90),
                         itemCount: filtered.length,
                         itemBuilder: (_, i) {
                           final p = filtered[i];
                           final qty = (p['quantity'] as num).toDouble();
                           final reorder = (p['reorder_level'] as num).toDouble();
                           final low = qty <= reorder;
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            child: ListTile(
-                              title: Text(p['name'] as String),
-                              subtitle: Text(_productSubtitle(p)),
-                              trailing: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text('$qty ${p['unit']}',
-                                      style: TextStyle(
-                                          color: low ? Colors.red : Colors.black87,
-                                          fontWeight: FontWeight.bold)),
-                                  if (low)
-                                    Text(AppStrings.t('low_stock'),
-                                        style: TextStyle(color: Colors.red, fontSize: 11)),
-                                ],
-                              ),
+                          final statusColor = low ? AppTheme.danger : AppTheme.success;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: AppCard(
+                              padding: const EdgeInsets.all(14),
                               onTap: () => _openProductForm(product: p),
                               onLongPress: () => _openStockHistory(p),
+                              child: Row(
+                                children: [
+                                  IconBadge(
+                                    icon: low ? Icons.warning_amber_rounded : Icons.inventory_2_outlined,
+                                    color: statusColor,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 13),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(p['name'] as String,
+                                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                                        const SizedBox(height: 2),
+                                        Text(_productSubtitle(p),
+                                            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text('$qty ${p['unit']}',
+                                          style: TextStyle(
+                                              color: statusColor, fontWeight: FontWeight.bold, fontSize: 14)),
+                                      const SizedBox(height: 3),
+                                      StatusPill(
+                                        label: low ? AppStrings.t('low_stock') : 'OK',
+                                        color: statusColor,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },

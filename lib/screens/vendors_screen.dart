@@ -14,6 +14,11 @@ class VendorsScreen extends StatefulWidget {
 
 class _VendorsScreenState extends State<VendorsScreen> {
   final _db = DBHelper.instance;
+  // Tracks which vendor(s) currently have a quick-payment save in flight,
+  // so double-tapping "Payment" on the same vendor while it's still
+  // saving can't create two payment records — the same class of bug
+  // that caused a duplicate sale entry.
+  final Set<String> _busyVendorIds = {};
 
   String _vendorSubtitle(Map<String, dynamic> v) {
     final phone = v['phone'] as String? ?? '';
@@ -105,6 +110,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
   }
 
   Future<void> _quickCollectPayment(String vendorId, String vendorName) async {
+    if (_busyVendorIds.contains(vendorId)) return;
     final amountCtrl = TextEditingController();
     final saved = await showDialog<bool>(
       context: context,
@@ -124,13 +130,18 @@ class _VendorsScreenState extends State<VendorsScreen> {
     );
     final amount = double.tryParse(amountCtrl.text) ?? 0;
     if (saved != true || amount <= 0) return;
+    setState(() => _busyVendorIds.add(vendorId));
     try {
-      await _db.addCreditTransaction(vendorId: vendorId, type: 'PAYMENT', amount: amount);
+      await _db.addCreditTransaction(vendorId: vendorId, type: 'PAYMENT', amount: amount).timeout(
+            const Duration(seconds: 25),
+          );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_record_payment')}: $e")));
       }
+    } finally {
+      if (mounted) setState(() => _busyVendorIds.remove(vendorId));
     }
   }
 
@@ -377,9 +388,17 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                         const SizedBox(width: 10),
                                         Expanded(
                                           child: FilledButton.icon(
-                                            onPressed: () => _quickCollectPayment(
-                                                v['id'] as String, v['name'] as String),
-                                            icon: const Icon(Icons.payments_outlined, size: 16),
+                                            onPressed: _busyVendorIds.contains(v['id'])
+                                                ? null
+                                                : () => _quickCollectPayment(
+                                                    v['id'] as String, v['name'] as String),
+                                            icon: _busyVendorIds.contains(v['id'])
+                                                ? const SizedBox(
+                                                    height: 14,
+                                                    width: 14,
+                                                    child: CircularProgressIndicator(
+                                                        strokeWidth: 2, color: Colors.white))
+                                                : const Icon(Icons.payments_outlined, size: 16),
                                             label: Text(AppStrings.t('payment')),
                                             style: FilledButton.styleFrom(
                                               padding: const EdgeInsets.symmetric(vertical: 10),
@@ -419,8 +438,10 @@ class VendorDetailScreen extends StatefulWidget {
 
 class _VendorDetailScreenState extends State<VendorDetailScreen> {
   final _db = DBHelper.instance;
+  bool _saving = false;
 
   Future<void> _recordTransaction(String type) async {
+    if (_saving) return;
     final amountCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     DateTime txnDate = DateTime.now();
@@ -476,13 +497,25 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
 
     final amount = double.tryParse(amountCtrl.text) ?? 0;
     if (saved == true && amount > 0) {
-      await _db.addCreditTransaction(
-        vendorId: widget.vendor['id'] as String,
-        type: type,
-        amount: amount,
-        notes: notesCtrl.text.trim(),
-        date: txnDate.toIso8601String(),
-      );
+      setState(() => _saving = true);
+      try {
+        await _db
+            .addCreditTransaction(
+              vendorId: widget.vendor['id'] as String,
+              type: type,
+              amount: amount,
+              notes: notesCtrl.text.trim(),
+              date: txnDate.toIso8601String(),
+            )
+            .timeout(const Duration(seconds: 25));
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save')}: $e")));
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
     }
   }
 
@@ -538,7 +571,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () => _recordTransaction('CREDIT'),
+                        onPressed: _saving ? null : () => _recordTransaction('CREDIT'),
                         icon: const Icon(Icons.add),
                         label: Text(AppStrings.t('add_credit')),
                       ),
@@ -546,8 +579,13 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: () => _recordTransaction('PAYMENT'),
-                        icon: const Icon(Icons.payments),
+                        onPressed: _saving ? null : () => _recordTransaction('PAYMENT'),
+                        icon: _saving
+                            ? const SizedBox(
+                                height: 14,
+                                width: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.payments),
                         label: Text(AppStrings.t('collect_payment')),
                       ),
                     ),

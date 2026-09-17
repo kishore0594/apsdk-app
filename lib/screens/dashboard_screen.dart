@@ -88,7 +88,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _db.getSalesSummaryByDay(days: 7),
         _db.getTotalSupplierDues(),
         _db.getRevenueCostProfit(startIso: todayStart, endIsoExclusive: todayEnd),
-      ]);
+      ]).timeout(
+        const Duration(seconds: 20),
+        // A timeout throws by default, which the catch block below already
+        // turns into a proper error screen with Retry — this just
+        // guarantees that happens within a bounded time instead of the
+        // spinner running indefinitely if a query is ever stuck (flaky
+        // connection, etc.).
+      );
       final collections = results[1] as List<Map<String, dynamic>>;
       final collectionsTotal =
           collections.fold<double>(0, (sum, c) => sum + (c['amount'] as num).toDouble());
@@ -182,7 +189,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final results = await Future.wait([
         _db.getProductWiseSales(startIso: start, endIsoExclusive: end),
         _db.getPaymentTypeWiseSales(startIso: start, endIsoExclusive: end),
-      ]);
+      ]).timeout(const Duration(seconds: 20));
       setState(() {
         _productWiseData = results[0];
         _paymentWiseData = results[1];

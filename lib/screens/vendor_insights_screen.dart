@@ -276,9 +276,9 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
       subtitle = purchaseCount == 0
           ? AppStrings.t('no_purchases_yet')
           : '$purchaseCount purchase${purchaseCount == 1 ? '' : 's'}'
-              "\${lastPurchase != null ? '  •  \${AppStrings.t('last_purchase')} \${formatDay(lastPurchase)}' : ''}";
+              '${lastPurchase != null ? '  •  ${AppStrings.t('last_purchase')} ${formatDay(lastPurchase)}' : ''}';
     } else if (showDays && days != null) {
-      subtitle = "\${AppStrings.t('outstanding_days')} $days \${AppStrings.t('days')}";
+      subtitle = "${AppStrings.t('outstanding_days')} $days ${AppStrings.t('days')}";
     } else {
       final place = (v['address'] as String? ?? '').trim();
       subtitle = place.isNotEmpty ? place : '$purchaseCount purchase${purchaseCount == 1 ? '' : 's'}';

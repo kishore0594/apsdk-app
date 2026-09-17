@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import '../db/db_helper.dart';
 import '../utils/csv_helper.dart';
 import '../utils/app_strings.dart';
+import '../utils/app_theme.dart';
 
 class DataSyncScreen extends StatefulWidget {
   const DataSyncScreen({super.key});
@@ -18,16 +19,21 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
   final _db = DBHelper.instance;
   bool _busy = false;
   String? _status;
+  bool _statusIsError = false;
 
   Future<void> _runBusy(Future<void> Function() task) async {
     setState(() {
       _busy = true;
       _status = null;
+      _statusIsError = false;
     });
     try {
       await task();
     } catch (e) {
-      setState(() => _status = 'Something went wrong: $e');
+      setState(() {
+        _status = 'Something went wrong: $e';
+        _statusIsError = true;
+      });
     } finally {
       setState(() => _busy = false);
     }
@@ -293,84 +299,112 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.scaffold,
       appBar: AppBar(title: Text(AppStrings.t('data_export_import'))),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            color: Colors.blue.shade50,
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Text(
-                AppStrings.t('sync_explanation'),
-                style: const TextStyle(fontSize: 12.5),
-              ),
+          AppCard(
+            background: AppTheme.primaryLight,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const IconBadge(icon: Icons.info_outline, color: AppTheme.primary, size: 18),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(AppStrings.t('sync_explanation'), style: const TextStyle(fontSize: 12.5, height: 1.4)),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 20),
-          Text(AppStrings.t('export'), style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text(
-            AppStrings.t('export_explanation'),
-            style: const TextStyle(fontSize: 12.5, color: Colors.black54),
-          ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: _busy ? null : _exportAll,
-            icon: const Icon(Icons.upload_file),
-            label: Text(AppStrings.t('export_all_data')),
-          ),
-          const SizedBox(height: 28),
-          Text(AppStrings.t('import'), style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text(
-            AppStrings.t('import_explanation'),
-            style: const TextStyle(fontSize: 12.5, color: Colors.black54),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _importProducts,
-            icon: const Icon(Icons.inventory_2_outlined),
-            label: Text(AppStrings.t('import_products_csv')),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _importVendors,
-            icon: const Icon(Icons.people_outline),
-            label: Text(AppStrings.t('import_vendors_csv')),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _importSuppliers,
-            icon: const Icon(Icons.local_shipping_outlined),
-            label: Text(AppStrings.t('import_suppliers_csv')),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _importVendorCreditHistory,
-            icon: const Icon(Icons.receipt_long_outlined),
-            label: Text(AppStrings.t('import_vendor_credit_history')),
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.only(left: 4),
-            child: Text(
-              AppStrings.t('vendor_credit_csv_columns'),
-              style: const TextStyle(fontSize: 11, color: Colors.black45),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const IconBadge(icon: Icons.upload_file, color: AppTheme.revenue, size: 18),
+                    const SizedBox(width: 10),
+                    Text(AppStrings.t('export'),
+                        style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(AppStrings.t('export_explanation'), style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: _busy ? null : _exportAll,
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.revenue),
+                    icon: const Icon(Icons.upload_file),
+                    label: Text(AppStrings.t('export_all_data')),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _importSupplierTransactionHistory,
-            icon: const Icon(Icons.receipt_long_outlined),
-            label: Text(AppStrings.t('import_supplier_txn_history')),
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.only(left: 4),
-            child: Text(
-              AppStrings.t('supplier_txn_csv_columns'),
-              style: const TextStyle(fontSize: 11, color: Colors.black45),
+          const SizedBox(height: 16),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const IconBadge(icon: Icons.download, color: AppTheme.profit, size: 18),
+                    const SizedBox(width: 10),
+                    Text(AppStrings.t('import'),
+                        style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(AppStrings.t('import_explanation'), style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+                const SizedBox(height: 14),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _importProducts,
+                  icon: const Icon(Icons.inventory_2_outlined, color: AppTheme.accent),
+                  label: Text(AppStrings.t('import_products_csv')),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _importVendors,
+                  icon: const Icon(Icons.people_outline, color: AppTheme.danger),
+                  label: Text(AppStrings.t('import_vendors_csv')),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _importSuppliers,
+                  icon: const Icon(Icons.local_shipping_outlined, color: AppTheme.cost),
+                  label: Text(AppStrings.t('import_suppliers_csv')),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _importVendorCreditHistory,
+                  icon: const Icon(Icons.receipt_long_outlined, color: AppTheme.danger),
+                  label: Text(AppStrings.t('import_vendor_credit_history')),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, top: 4),
+                  child: Text(
+                    AppStrings.t('vendor_credit_csv_columns'),
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _importSupplierTransactionHistory,
+                  icon: const Icon(Icons.receipt_long_outlined, color: AppTheme.cost),
+                  label: Text(AppStrings.t('import_supplier_txn_history')),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, top: 4),
+                  child: Text(
+                    AppStrings.t('supplier_txn_csv_columns'),
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                  ),
+                ),
+              ],
             ),
           ),
           if (_busy) ...[
@@ -378,15 +412,21 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
             const Center(child: CircularProgressIndicator()),
           ],
           if (_status != null) ...[
-            const SizedBox(height: 20),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(8),
+            const SizedBox(height: 16),
+            AppCard(
+              background: (_statusIsError ? AppTheme.danger : AppTheme.success).withOpacity(0.08),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  IconBadge(
+                    icon: _statusIsError ? Icons.error_outline : Icons.check_circle_outline,
+                    color: _statusIsError ? AppTheme.danger : AppTheme.success,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(_status!, style: const TextStyle(fontSize: 13))),
+                ],
               ),
-              child: Text(_status!, style: const TextStyle(fontSize: 13)),
             ),
           ],
         ],

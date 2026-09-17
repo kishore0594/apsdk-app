@@ -168,12 +168,14 @@ class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Color? background;
   const AppCard({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.onTap,
+    this.onLongPress,
     this.background,
   });
 
@@ -189,9 +191,10 @@ class AppCard extends StatelessWidget {
       ),
       child: child,
     );
-    if (onTap == null) return content;
+    if (onTap == null && onLongPress == null) return content;
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       borderRadius: BorderRadius.circular(AppTheme.radius),
       child: content,
     );

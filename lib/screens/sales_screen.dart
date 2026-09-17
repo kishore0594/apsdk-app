@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
+import '../utils/app_theme.dart';
 
 // Units sold by weight/volume need decimal quantities (e.g. 0.75 Kgs).
 // Count-based units (Nos, Box, Dozen, Packet...) stay whole numbers.
@@ -277,19 +278,20 @@ class _SalesScreenState extends State<SalesScreen> {
 
           return Column(
             children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                color: Theme.of(context).colorScheme.primaryContainer,
-                child: Text(
-                  '${_todayOnly ? "Today's" : "Total"} Sales: ${formatCurrency(total)}  ($activeCount bills)',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+              SummaryBanner(
+                icon: Icons.receipt_long_outlined,
+                label: _todayOnly ? AppStrings.t('todays_sales') : AppStrings.t('total'),
+                value: formatCurrency(total),
+                color: AppTheme.revenue,
+                caption: '$activeCount bills',
               ),
+              const SizedBox(height: 6),
               Theme(
                 data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
-                  title: Text(AppStrings.t('monthly_sales_trend'), style: const TextStyle(fontSize: 14)),
+                  leading: const IconBadge(icon: Icons.show_chart, color: AppTheme.accent, size: 16),
+                  title: Text(AppStrings.t('monthly_sales_trend'),
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                   subtitle: Text(AppStrings.t('last_30_days'), style: const TextStyle(fontSize: 11)),
                   children: [
                     Padding(
@@ -301,49 +303,75 @@ class _SalesScreenState extends State<SalesScreen> {
               ),
               Expanded(
                 child: sales.isEmpty
-                    ? Center(child: Text(AppStrings.t('no_sales_tap_add')))
+                    ? EmptyState(icon: Icons.point_of_sale_outlined, title: AppStrings.t('no_sales_tap_add'))
                     : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(14, 6, 14, 90),
                         itemCount: sales.length,
                         itemBuilder: (_, i) {
                           final s = sales[i];
                           final isCancelled = s['status'] == 'cancelled';
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            color: isCancelled ? Colors.grey.shade100 : null,
-                            child: ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: isCancelled
-                                    ? Colors.grey.shade300
-                                    : (s['payment_type'] == 'CASH'
-                                        ? Colors.green.shade100
-                                        : Colors.orange.shade100),
-                                child: Icon(
-                                  isCancelled
-                                      ? Icons.block
-                                      : (s['payment_type'] == 'CASH' ? Icons.money : Icons.credit_card),
-                                  color: isCancelled
-                                      ? Colors.grey.shade600
-                                      : (s['payment_type'] == 'CASH' ? Colors.green : Colors.orange),
-                                ),
-                              ),
-                              title: Text(
-                                formatCurrency(s['total_amount']),
-                                style: isCancelled
-                                    ? const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.grey)
-                                    : null,
-                              ),
-                              subtitle: Text(
-                                isCancelled
-                                    ? "${AppStrings.t('cancelled')}  •  ${formatDate(s['date'] as String)}"
-                                    : s['due_date'] != null
-                                        ? '${formatDate(s['date'] as String)}\nDue ${formatDay(s['due_date'] as String)}'
-                                        : formatDate(s['date'] as String),
-                                style: isCancelled ? const TextStyle(color: Colors.red) : null,
-                              ),
-                              isThreeLine: !isCancelled && s['due_date'] != null,
-                              trailing: Text(s['payment_type'] as String),
+                          final payType = s['payment_type'] as String;
+                          final payColor = isCancelled
+                              ? Colors.grey
+                              : payType == 'CASH'
+                                  ? AppTheme.success
+                                  : payType == 'PARTIAL'
+                                      ? AppTheme.warning
+                                      : AppTheme.danger;
+                          final payLabel = payType == 'CASH'
+                              ? AppStrings.t('cash')
+                              : payType == 'PARTIAL'
+                                  ? AppStrings.t('partial')
+                                  : AppStrings.t('full_credit');
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: AppCard(
+                              padding: const EdgeInsets.all(14),
+                              background: isCancelled ? Colors.grey.shade50 : null,
                               onTap: () => _viewSale(s),
                               onLongPress: () => _showSaleActions(s),
+                              child: Row(
+                                children: [
+                                  IconBadge(
+                                    icon: isCancelled
+                                        ? Icons.block
+                                        : (payType == 'CASH' ? Icons.money : Icons.credit_card),
+                                    color: payColor,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 13),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          formatCurrency(s['total_amount']),
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 15,
+                                            decoration: isCancelled ? TextDecoration.lineThrough : null,
+                                            color: isCancelled ? Colors.grey : null,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          isCancelled
+                                              ? formatDate(s['date'] as String)
+                                              : s['due_date'] != null
+                                                  ? '${formatDate(s['date'] as String)} • Due ${formatDay(s['due_date'] as String)}'
+                                                  : formatDate(s['date'] as String),
+                                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  StatusPill(
+                                    label: isCancelled ? AppStrings.t('cancelled') : payLabel,
+                                    color: payColor,
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },
@@ -399,6 +427,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   List<Map<String, dynamic>> _products = [];
   List<Map<String, dynamic>> _vendors = [];
   final List<_CartLine> _cart = [];
+  bool _saving = false;
 
   String _paymentType = 'CASH';
   String? _vendorId;
@@ -557,6 +586,12 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   }
 
   Future<void> _checkout() async {
+    // Guards against exactly the bug that was reported: if this runs
+    // twice in quick succession (a double-tap, or a tap that lands again
+    // after the screen freezes/redraws), the second call does nothing
+    // instead of creating a second sale.
+    if (_saving) return;
+
     if (_cart.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppStrings.t('add_at_least_one_item'))));
       return;
@@ -567,25 +602,34 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     }
     final paid = _paymentType == 'CASH' ? _total : (double.tryParse(_paidCtrl.text) ?? 0);
 
+    setState(() => _saving = true);
     try {
-      await _db.createSale(
-        items: _cart
-            .map((l) => {
-                  'product_id': l.product['id'],
-                  'product_name': l.product['name'],
-                  'quantity': l.quantity,
-                  'unit_price': l.product['selling_price'],
-                })
-            .toList(),
-        discount: _discount,
-        paymentType: _paymentType,
-        vendorId: _vendorId,
-        paidAmount: paid,
-        saleDate: _saleDate.toIso8601String(),
-        dueDate: _dueDate?.toIso8601String(),
-      );
+      await _db
+          .createSale(
+            items: _cart
+                .map((l) => {
+                      'product_id': l.product['id'],
+                      'product_name': l.product['name'],
+                      'quantity': l.quantity,
+                      'unit_price': l.product['selling_price'],
+                    })
+                .toList(),
+            discount: _discount,
+            paymentType: _paymentType,
+            vendorId: _vendorId,
+            paidAmount: paid,
+            saleDate: _saleDate.toIso8601String(),
+            dueDate: _dueDate?.toIso8601String(),
+          )
+          // A save should never hang forever — if something is badly stuck
+          // (e.g. a flaky connection Firestore keeps retrying on rather
+          // than falling back to the local queue), this guarantees the
+          // button re-enables and you get a clear error instead of an
+          // unresponsive screen.
+          .timeout(const Duration(seconds: 25));
     } catch (e) {
       if (mounted) {
+        setState(() => _saving = false);
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save_sale')}: $e")));
       }
@@ -851,7 +895,15 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  FilledButton(onPressed: _checkout, child: Text(AppStrings.t('complete_sale'))),
+                  FilledButton(
+                    onPressed: _saving ? null : _checkout,
+                    child: _saving
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : Text(AppStrings.t('complete_sale')),
+                  ),
                 ],
               ),
             ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
+import '../utils/app_theme.dart';
 
 class SuppliersScreen extends StatefulWidget {
   const SuppliersScreen({super.key});
@@ -12,6 +13,44 @@ class SuppliersScreen extends StatefulWidget {
 
 class _SuppliersScreenState extends State<SuppliersScreen> {
   final _db = DBHelper.instance;
+  // Same double-submission guard as the Vendors quick-payment button.
+  final Set<String> _busySupplierIds = {};
+
+  Future<void> _quickPaySupplier(String supplierId, String supplierName) async {
+    if (_busySupplierIds.contains(supplierId)) return;
+    final amountCtrl = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('${AppStrings.t('pay_supplier')} — $supplierName'),
+        content: TextField(
+          controller: amountCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(labelText: AppStrings.t('amount')),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
+        ],
+      ),
+    );
+    final amount = double.tryParse(amountCtrl.text) ?? 0;
+    if (saved != true || amount <= 0) return;
+    setState(() => _busySupplierIds.add(supplierId));
+    try {
+      await _db
+          .addSupplierTransaction(supplierId: supplierId, type: 'PAYMENT', amount: amount)
+          .timeout(const Duration(seconds: 25));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save')}: $e")));
+      }
+    } finally {
+      if (mounted) setState(() => _busySupplierIds.remove(supplierId));
+    }
+  }
 
   Future<void> _addSupplier() async {
     final nameCtrl = TextEditingController();
@@ -143,78 +182,148 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
           final suppliers = snapshot.data!;
           final totalOwed = suppliers.fold<double>(
               0, (sum, s) => sum + ((s['balance'] as num?)?.toDouble() ?? 0));
+          final owingCount =
+              suppliers.where((s) => ((s['balance'] as num?)?.toDouble() ?? 0) > 0).length;
 
           return Column(
             children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                color: Theme.of(context).colorScheme.primaryContainer,
-                child: Text("${AppStrings.t('total_owed_suppliers')}: ${formatCurrency(totalOwed)}",
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+              SummaryBanner(
+                icon: Icons.local_shipping_outlined,
+                label: AppStrings.t('total_owed_suppliers'),
+                value: formatCurrency(totalOwed),
+                color: totalOwed > 0 ? AppTheme.cost : AppTheme.success,
+                caption: '$owingCount of ${suppliers.length}',
               ),
               Expanded(
                 child: suppliers.isEmpty
-                    ? Center(child: Text(AppStrings.t('no_suppliers_tap_add')))
+                    ? EmptyState(
+                        icon: Icons.local_shipping_outlined,
+                        title: AppStrings.t('no_suppliers_tap_add'),
+                        action: FilledButton.icon(
+                          onPressed: _addSupplier,
+                          icon: const Icon(Icons.add_business, size: 18),
+                          label: Text(AppStrings.t('add_supplier')),
+                        ),
+                      )
                     : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(14, 10, 14, 90),
                         itemCount: suppliers.length,
                         itemBuilder: (_, i) {
                           final s = suppliers[i];
                           final balance = (s['balance'] as num?)?.toDouble() ?? 0;
-                          return Card(
-                            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            child: ListTile(
-                              leading:
-                                  CircleAvatar(child: Text((s['name'] as String)[0].toUpperCase())),
-                              title: Text(s['name'] as String),
-                              subtitle: Text(s['phone'] as String? ?? ''),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
+                          final owes = balance > 0;
+                          final busy = _busySupplierIds.contains(s['id']);
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: AppCard(
+                              padding: const EdgeInsets.all(14),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => SupplierDetailScreen(supplier: s)),
+                              ),
+                              child: Column(
                                 children: [
-                                  Text(
-                                    formatCurrency(balance),
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: balance > 0 ? Colors.red : Colors.green,
-                                    ),
-                                  ),
-                                  PopupMenuButton<String>(
-                                    icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
-                                    padding: EdgeInsets.zero,
-                                    onSelected: (choice) {
-                                      if (choice == 'edit') {
-                                        _editSupplier(s);
-                                      } else if (choice == 'delete') {
-                                        _deleteSupplier(s);
-                                      }
-                                    },
-                                    itemBuilder: (_) => [
-                                      PopupMenuItem(
-                                        value: 'edit',
-                                        child: ListTile(
-                                          leading: const Icon(Icons.edit_outlined),
-                                          title: Text(AppStrings.t('edit')),
-                                          contentPadding: EdgeInsets.zero,
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 21,
+                                        backgroundColor:
+                                            (owes ? AppTheme.cost : AppTheme.success).withOpacity(0.12),
+                                        child: Text(
+                                          (s['name'] as String)[0].toUpperCase(),
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 17,
+                                            color: owes ? AppTheme.cost : AppTheme.success,
+                                          ),
                                         ),
                                       ),
-                                      PopupMenuItem(
-                                        value: 'delete',
-                                        child: ListTile(
-                                          leading: const Icon(Icons.delete_outline, color: Colors.red),
-                                          title: Text(AppStrings.t('delete'), style: const TextStyle(color: Colors.red)),
-                                          contentPadding: EdgeInsets.zero,
+                                      const SizedBox(width: 13),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(s['name'] as String,
+                                                style: const TextStyle(
+                                                    fontWeight: FontWeight.w600, fontSize: 15)),
+                                            if ((s['phone'] as String?)?.isNotEmpty == true)
+                                              Padding(
+                                                padding: const EdgeInsets.only(top: 2),
+                                                child: Text(s['phone'] as String,
+                                                    style: TextStyle(
+                                                        fontSize: 12, color: Colors.grey.shade600)),
+                                              ),
+                                          ],
                                         ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text(formatCurrency(balance),
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 15,
+                                                color: owes ? AppTheme.cost : AppTheme.success,
+                                              )),
+                                        ],
+                                      ),
+                                      PopupMenuButton<String>(
+                                        icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
+                                        padding: EdgeInsets.zero,
+                                        onSelected: (choice) {
+                                          if (choice == 'edit') {
+                                            _editSupplier(s);
+                                          } else if (choice == 'delete') {
+                                            _deleteSupplier(s);
+                                          }
+                                        },
+                                        itemBuilder: (_) => [
+                                          PopupMenuItem(
+                                            value: 'edit',
+                                            child: ListTile(
+                                              leading: const Icon(Icons.edit_outlined),
+                                              title: Text(AppStrings.t('edit')),
+                                              contentPadding: EdgeInsets.zero,
+                                            ),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'delete',
+                                            child: ListTile(
+                                              leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+                                              title: Text(AppStrings.t('delete'),
+                                                  style: const TextStyle(color: AppTheme.danger)),
+                                              contentPadding: EdgeInsets.zero,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),
+                                  if (owes) ...[
+                                    const Divider(height: 22),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: FilledButton.icon(
+                                        onPressed: busy
+                                            ? null
+                                            : () => _quickPaySupplier(s['id'] as String, s['name'] as String),
+                                        icon: busy
+                                            ? const SizedBox(
+                                                height: 14,
+                                                width: 14,
+                                                child: CircularProgressIndicator(
+                                                    strokeWidth: 2, color: Colors.white))
+                                            : const Icon(Icons.payments_outlined, size: 16),
+                                        label: Text(AppStrings.t('pay_supplier')),
+                                        style: FilledButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(vertical: 10),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => SupplierDetailScreen(supplier: s)),
-                                );
-                              },
                             ),
                           );
                         },
@@ -239,8 +348,10 @@ class SupplierDetailScreen extends StatefulWidget {
 
 class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
   final _db = DBHelper.instance;
+  bool _saving = false;
 
   Future<void> _recordPayment() async {
+    if (_saving) return;
     final amountCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     final saved = await showDialog<bool>(
@@ -271,12 +382,24 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
 
     final amount = double.tryParse(amountCtrl.text) ?? 0;
     if (saved == true && amount > 0) {
-      await _db.addSupplierTransaction(
-        supplierId: widget.supplier['id'] as String,
-        type: 'PAYMENT',
-        amount: amount,
-        notes: notesCtrl.text.trim(),
-      );
+      setState(() => _saving = true);
+      try {
+        await _db
+            .addSupplierTransaction(
+              supplierId: widget.supplier['id'] as String,
+              type: 'PAYMENT',
+              amount: amount,
+              notes: notesCtrl.text.trim(),
+            )
+            .timeout(const Duration(seconds: 25));
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save')}: $e")));
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
     }
   }
 
@@ -333,8 +456,13 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton.icon(
-                        onPressed: _recordPayment,
-                        icon: const Icon(Icons.payments),
+                        onPressed: _saving ? null : _recordPayment,
+                        icon: _saving
+                            ? const SizedBox(
+                                height: 14,
+                                width: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.payments),
                         label: Text(AppStrings.t('pay_supplier')),
                       ),
                     ),
@@ -463,6 +591,7 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
   List<Map<String, dynamic>> _products = [];
   final List<_PurchaseLine> _lines = [];
   final _notesCtrl = TextEditingController();
+  bool _saving = false;
 
   @override
   void initState() {
@@ -488,22 +617,35 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (_lines.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppStrings.t('add_at_least_one_product'))));
       return;
     }
-    await _db.addSupplierPurchase(
-      supplierId: widget.supplierId,
-      items: _lines
-          .map((l) => {
-                'product_id': l.product['id'],
-                'product_name': l.product['name'],
-                'quantity': l.quantity,
-                'unit_cost': l.unitCost,
-              })
-          .toList(),
-      notes: _notesCtrl.text.trim(),
-    );
+    setState(() => _saving = true);
+    try {
+      await _db
+          .addSupplierPurchase(
+            supplierId: widget.supplierId,
+            items: _lines
+                .map((l) => {
+                      'product_id': l.product['id'],
+                      'product_name': l.product['name'],
+                      'quantity': l.quantity,
+                      'unit_cost': l.unitCost,
+                    })
+                .toList(),
+            notes: _notesCtrl.text.trim(),
+          )
+          .timeout(const Duration(seconds: 25));
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("${AppStrings.t('could_not_save')}: $e")));
+      }
+      return;
+    }
     if (mounted) Navigator.pop(context, true);
   }
 
@@ -592,7 +734,15 @@ class _NewPurchaseSheetState extends State<_NewPurchaseSheet> {
               Text('${AppStrings.t('total')}: ${formatCurrency(_total)}',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 8),
-              FilledButton(onPressed: _save, child: Text(AppStrings.t('save_purchase'))),
+              FilledButton(
+                onPressed: _saving ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Text(AppStrings.t('save_purchase')),
+              ),
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () => Navigator.pop(context),
