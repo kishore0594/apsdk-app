@@ -31,6 +31,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> _byCategory = [];
   List<Map<String, dynamic>> _bySubcategory = [];
   List<Map<String, dynamic>> _creditTrend = [];
+  double _cashCollected = 0;
+  double _creditPaymentsCollected = 0;
 
   @override
   void initState() {
@@ -90,6 +92,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _db.getCategoryWiseSales(startIso: start, endIsoExclusive: end),
         _db.getSubcategoryWiseSales(startIso: start, endIsoExclusive: end),
         _db.getCreditTrend(startIso: start, endIsoExclusive: end),
+        _db.getCashCollected(startIso: start, endIsoExclusive: end),
       ]);
       final summary = results[0] as Map<String, dynamic>;
       setState(() {
@@ -103,6 +106,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _byCategory = results[4] as List<Map<String, dynamic>>;
         _bySubcategory = results[5] as List<Map<String, dynamic>>;
         _creditTrend = results[6] as List<Map<String, dynamic>>;
+        final cashFlow = results[7] as Map<String, dynamic>;
+        _cashCollected = (cashFlow['cash_collected'] as num?)?.toDouble() ?? 0;
+        _creditPaymentsCollected = (cashFlow['credit_payments_collected'] as num?)?.toDouble() ?? 0;
         _loading = false;
       });
     } catch (e) {
@@ -209,6 +215,53 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               icon: Icons.receipt_long_outlined,
                               color: const Color(0xFF7C3AED)),
                         ],
+                      ),
+                      const SizedBox(height: 20),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF16A34A).withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF16A34A).withOpacity(0.2)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(AppStrings.t('cash_flow_caption'),
+                                style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.3)),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(AppStrings.t('cash_collected'),
+                                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                      const SizedBox(height: 2),
+                                      Text(formatCurrency(_cashCollected),
+                                          style: const TextStyle(
+                                              fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(AppStrings.t('credit_payments_collected'),
+                                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                                      const SizedBox(height: 2),
+                                      Text(formatCurrency(_creditPaymentsCollected),
+                                          style: const TextStyle(
+                                              fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF16A34A))),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 28),
                       _SectionHeader(AppStrings.t('revenue_over_period')),

@@ -627,6 +627,110 @@ class DBHelper {
     return result;
   }
 
+  /// One consolidated fetch for the Vendors tab's insights strip — each
+  /// vendor's transaction history is read once and used to derive
+  /// several things together, rather than a separate query per metric:
+  /// - avg_days_outstanding: average, across vendors currently owing,
+  ///   of how long their present balance has been unpaid.
+  /// - new_this_month: vendors added since the start of this calendar
+  ///   month.
+  /// - collected_this_week: credit payments collected in the last 7
+  ///   days, across every vendor.
+  /// - needs_attention: vendors who both owe money for 30+ days AND
+  ///   have had no transaction (credit or payment) in the last 14 days
+  ///   — overdue and gone quiet, the ones most worth following up on
+  ///   first.
+  /// - trends: each vendor's net balance change over the last 14 days
+  ///   (positive = growing, i.e. owing more; negative = shrinking, i.e.
+  ///   being paid down), keyed by vendor id.
+  ///
+  /// A one-time fetch per screen visit, not a live stream — same
+  /// reasoning as Vendor Insights and Reports & Trends: a considered
+  /// snapshot, not something that needs to update mid-glance.
+  Future<Map<String, dynamic>> getVendorInsightsSummary() async {
+    final vendors = await getVendors();
+    final now = DateTime.now();
+    final weekAgo = now.subtract(const Duration(days: 7)).toIso8601String();
+    final monthStart = DateTime(now.year, now.month, 1).toIso8601String();
+    final trendCutoff = now.subtract(const Duration(days: 14)).toIso8601String();
+    final attentionCutoff = now.subtract(const Duration(days: 14)).toIso8601String();
+
+    var newThisMonth = 0;
+    double collectedThisWeek = 0;
+    final daysOutstandingList = <int>[];
+    final needsAttention = <Map<String, dynamic>>[];
+    final trends = <String, double>{};
+
+    for (final v in vendors) {
+      final createdAt = v['created_at'] as String?;
+      if (createdAt != null && createdAt.compareTo(monthStart) >= 0) newThisMonth++;
+
+      final vendorId = v['id'] as String;
+      final balance = (v['balance'] as num?)?.toDouble() ?? 0;
+
+      // Sorted client-side (ascending, oldest first) — see getStockHistory
+      // for why the query itself has no orderBy.
+      final snap = await _creditTxns.where('vendor_id', isEqualTo: vendorId).get();
+      final txns = _fromSnapshot(snap)..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+
+      for (final t in txns) {
+        final date = t['date'] as String;
+        final amount = (t['amount'] as num).toDouble();
+        if (t['type'] == 'PAYMENT' && date.compareTo(weekAgo) >= 0) {
+          collectedThisWeek += amount;
+        }
+      }
+
+      if (balance <= 0) continue;
+
+      // Same days-outstanding algorithm as getVendorOutstandingDays,
+      // computed here inline so the transaction history fetched above
+      // isn't queried a second time.
+      double runningBalance = 0;
+      DateTime? openedSince;
+      String? lastActivity;
+      for (final t in txns) {
+        final date = t['date'] as String;
+        final amount = (t['amount'] as num).toDouble();
+        runningBalance = t['type'] == 'CREDIT' ? runningBalance + amount : runningBalance - amount;
+        if (runningBalance <= 0) {
+          openedSince = null;
+        } else if (openedSince == null) {
+          openedSince = DateTime.tryParse(date);
+        }
+        if (lastActivity == null || date.compareTo(lastActivity) > 0) lastActivity = date;
+      }
+      if (runningBalance <= 0 || openedSince == null) continue;
+      final daysOut = now.difference(openedSince).inDays;
+      daysOutstandingList.add(daysOut);
+
+      double netChange = 0;
+      for (final t in txns) {
+        final date = t['date'] as String;
+        if (date.compareTo(trendCutoff) < 0) continue;
+        final amount = (t['amount'] as num).toDouble();
+        netChange += t['type'] == 'CREDIT' ? amount : -amount;
+      }
+      trends[vendorId] = netChange;
+
+      if (daysOut >= 30 && (lastActivity == null || lastActivity.compareTo(attentionCutoff) < 0)) {
+        needsAttention.add({...v, 'balance': balance, 'days_outstanding': daysOut});
+      }
+    }
+
+    needsAttention.sort((a, b) => (b['days_outstanding'] as int).compareTo(a['days_outstanding'] as int));
+    final avgDaysOutstanding =
+        daysOutstandingList.isEmpty ? 0.0 : daysOutstandingList.reduce((a, b) => a + b) / daysOutstandingList.length;
+
+    return {
+      'avg_days_outstanding': avgDaysOutstanding,
+      'new_this_month': newThisMonth,
+      'collected_this_week': collectedThisWeek,
+      'needs_attention': needsAttention,
+      'trends': trends,
+    };
+  }
+
   // ---------------- SALES ----------------
 
   /// Creates a sale with its line items, deducts stock for each item, and
@@ -1007,6 +1111,52 @@ class DBHelper {
     }
 
     return {'revenue': revenue, 'cost': cost, 'profit': revenue - cost, 'count': count};
+  }
+
+  /// Actual cash that physically came into the shop during a period —
+  /// deliberately separate from Revenue/Profit above, which count a sale
+  /// the moment it's made regardless of payment type. Split into two
+  /// sources, matching how money actually arrives:
+  /// - cash_collected: the immediate amount collected on sales made THIS
+  ///   period (full amount for a CASH sale, just the upfront portion for
+  ///   a PARTIAL sale — a CREDIT sale contributes 0 here since nothing
+  ///   was collected at the time).
+  /// - credit_payments_collected: money collected THIS period against
+  ///   debt a vendor already owed — could be from an old sale, not
+  ///   necessarily one made this period. ADJUSTMENT entries (a cancelled
+  ///   sale reversing its own credit) are excluded — that's a correction,
+  ///   not real cash coming in.
+  Future<Map<String, dynamic>> getCashCollected({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    final salesSnap = await _sales
+        .where('date', isGreaterThanOrEqualTo: startIso)
+        .where('date', isLessThan: endIsoExclusive)
+        .get();
+    double cashCollected = 0;
+    for (final doc in salesSnap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['status'] == 'cancelled') continue;
+      final type = data['payment_type'] as String?;
+      if (type == 'CASH' || type == 'PARTIAL') {
+        cashCollected += (data['paid_amount'] as num?)?.toDouble() ?? 0;
+      }
+    }
+
+    final txnSnap = await _creditTxns
+        .where('date', isGreaterThanOrEqualTo: startIso)
+        .where('date', isLessThan: endIsoExclusive)
+        .get();
+    double creditPaymentsCollected = 0;
+    for (final doc in txnSnap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      if (data['type'] == 'PAYMENT') {
+        creditPaymentsCollected += (data['amount'] as num?)?.toDouble() ?? 0;
+      }
+    }
+
+    return {'cash_collected': cashCollected, 'credit_payments_collected': creditPaymentsCollected};
   }
 
   /// Sales broken down by product category for a date range — feeds the
