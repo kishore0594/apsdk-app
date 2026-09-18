@@ -5,7 +5,8 @@ import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
 
 class InventoryScreen extends StatefulWidget {
-  const InventoryScreen({super.key});
+  final String? initialCategoryFilter;
+  const InventoryScreen({super.key, this.initialCategoryFilter});
 
   @override
   State<InventoryScreen> createState() => _InventoryScreenState();
@@ -18,7 +19,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   // triggers a new Firestore subscription.
   late final Stream<List<Map<String, dynamic>>> _productsStream = _db.watchProducts();
   String _search = '';
-  String _categoryFilter = 'All';
+  late String _categoryFilter = widget.initialCategoryFilter ?? 'All';
   String _subcategoryFilter = 'All';
 
   List<String> _categoryChips(List<Map<String, dynamic>> products) {
@@ -228,6 +229,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           final reorder = (p['reorder_level'] as num).toDouble();
                           final low = qty <= reorder;
                           final statusColor = low ? AppTheme.danger : AppTheme.success;
+                          final noCost = ((p['cost_price'] as num?)?.toDouble() ?? 0) <= 0;
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: AppCard(
@@ -246,8 +248,22 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(p['name'] as String,
-                                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                                        Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(p['name'] as String,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                                            ),
+                                            if (noCost) ...[
+                                              const SizedBox(width: 6),
+                                              const Tooltip(
+                                                message: 'Cost price not set — profit reports overstate this item',
+                                                child: Icon(Icons.info_outline, size: 14, color: Colors.orange),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
                                         const SizedBox(height: 2),
                                         Text(_productSubtitle(p),
                                             style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
@@ -324,6 +340,9 @@ class _ProductFormState extends State<_ProductForm> {
     _quantity = TextEditingController(text: (p?['quantity'] ?? 0).toString());
     _reorderLevel = TextEditingController(text: (p?['reorder_level'] ?? 0).toString());
     _costPrice = TextEditingController(text: (p?['cost_price'] ?? 0).toString());
+    // Rebuilds on every keystroke so the "cost price not set" warning below
+    // the field appears/disappears live as they type, not just on save.
+    _costPrice.addListener(() => setState(() {}));
     _sellingPrice = TextEditingController(text: (p?['selling_price'] ?? 0).toString());
     _supplierId = p?['supplier_id'] as String?;
     _loadSuppliers();
@@ -369,6 +388,32 @@ class _ProductFormState extends State<_ProductForm> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    final costPrice = double.tryParse(_costPrice.text) ?? 0;
+    if (costPrice <= 0) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange),
+              SizedBox(width: 8),
+              Expanded(child: Text('Cost price not set')),
+            ],
+          ),
+          content: const Text(
+            'This product has no cost price. Gross Profit reports will show this '
+            'product as 100% profit (nothing to subtract) until a real cost price '
+            'is entered — that will make your overall profit numbers look higher '
+            'than they actually are.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Go back and set it')),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save anyway')),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+    }
     final now = DateTime.now().toIso8601String();
     final data = {
       'name': _name.text.trim(),
@@ -377,7 +422,7 @@ class _ProductFormState extends State<_ProductForm> {
       'unit': _unit,
       'quantity': double.tryParse(_quantity.text) ?? 0,
       'reorder_level': double.tryParse(_reorderLevel.text) ?? 0,
-      'cost_price': double.tryParse(_costPrice.text) ?? 0,
+      'cost_price': costPrice,
       'selling_price': double.tryParse(_sellingPrice.text) ?? 0,
       'supplier_id': _supplierId,
       'updated_at': now,
@@ -479,6 +524,22 @@ class _ProductFormState extends State<_ProductForm> {
                   ),
                 ],
               ),
+              if ((double.tryParse(_costPrice.text) ?? 0) <= 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, size: 14, color: Colors.orange),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Not set — profit reports will overstate this product\'s margin.',
+                          style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 12),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,

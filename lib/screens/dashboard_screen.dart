@@ -10,10 +10,12 @@ import '../utils/locale_controller.dart';
 import '../utils/app_strings.dart';
 import 'sales_screen.dart';
 import 'vendors_screen.dart';
+import 'vendor_insights_screen.dart';
 import 'todays_collections_screen.dart';
 import 'data_sync_screen.dart';
 import 'suppliers_screen.dart';
 import 'reports_screen.dart';
+import 'inventory_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -24,6 +26,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final _db = DBHelper.instance;
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   double _todaysSales = 0;
   double _todaysCollections = 0;
@@ -220,6 +223,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
+      endDrawerEnableOpenDragGesture: true,
+      endDrawer: _buildQuickAccessDrawer(context),
       appBar: AppBar(
         title: Row(
           children: [
@@ -246,18 +252,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: _pickLanguage,
           ),
           IconButton(
-            tooltip: 'Reports & Trends',
-            icon: const Icon(Icons.bar_chart),
-            onPressed: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const ReportsScreen())),
-          ),
-          IconButton(
-            tooltip: 'Export / Import Data',
-            icon: const Icon(Icons.sync_alt),
-            onPressed: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const DataSyncScreen())),
-          ),
-          IconButton(
             tooltip: AppStrings.t('sign_out'),
             icon: const Icon(Icons.logout),
             onPressed: () async {
@@ -280,9 +274,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -422,38 +419,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 24),
                   Row(
                     children: [
-                      Text(AppStrings.t('low_stock_alerts'), style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(width: 8),
-                      if (_lowStock.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text('${_lowStock.length}',
-                              style: const TextStyle(color: Colors.white, fontSize: 12)),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_lowStock.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('All products are above reorder level.'),
-                    )
-                  else
-                    ..._lowStock.map((p) => Card(
-                          child: ListTile(
-                            leading: const Icon(Icons.warning_amber, color: Colors.red),
-                            title: Text(p['name'] as String),
-                            subtitle: Text(
-                                'In stock: ${p['quantity']} ${p['unit']}  •  Reorder level: ${p['reorder_level']}'),
-                          ),
-                        )),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
                       Text(AppStrings.t('outstanding_vendors'), style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(width: 8),
                       if (_agingVendors.isNotEmpty)
@@ -493,6 +458,115 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
             ),
+          ),
+          _buildPullTab(context),
+        ],
+      ),
+    );
+  }
+
+  /// A persistently visible tab on the right edge — tap (or swipe from
+  /// the edge) to open the "More" panel. Shows a small red dot when
+  /// there's a low-stock alert, so it hints something needs attention
+  /// even before it's opened.
+  Widget _buildPullTab(BuildContext context) {
+    return Positioned(
+      right: 0,
+      top: MediaQuery.of(context).size.height * 0.38,
+      child: GestureDetector(
+        onTap: () => _scaffoldKey.currentState?.openEndDrawer(),
+        child: Container(
+          width: 26,
+          height: 72,
+          decoration: BoxDecoration(
+            color: AppTheme.primary,
+            borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.18), blurRadius: 6, offset: const Offset(-1, 2)),
+            ],
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              const Icon(Icons.chevron_left, color: Colors.white, size: 20),
+              if (_lowStock.isNotEmpty)
+                const Positioned(
+                  top: 8,
+                  child: CircleAvatar(radius: 4, backgroundColor: Colors.redAccent),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The panel the pull tab opens — houses everything moved off the
+  /// Dashboard's app bar and body (Vendor Insights, Reports, Import/
+  /// Export, and the Low Stock list) so the Dashboard itself stays to
+  /// just its core at-a-glance numbers.
+  Widget _buildQuickAccessDrawer(BuildContext context) {
+    return Drawer(
+      width: MediaQuery.of(context).size.width * 0.7,
+      child: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+              child: Text('More',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primary)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const IconBadge(icon: Icons.insights_outlined, color: AppTheme.accent, size: 18),
+              title: const Text('Vendor Insights'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const VendorInsightsScreen()));
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.bar_chart, color: AppTheme.revenue, size: 18),
+              title: Text(AppStrings.t('reports_trends')),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsScreen()));
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.sync_alt, color: AppTheme.profit, size: 18),
+              title: Text(AppStrings.t('data_export_import')),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const DataSyncScreen()));
+              },
+            ),
+            ListTile(
+              leading: IconBadge(
+                icon: Icons.warning_amber_rounded,
+                color: _lowStock.isNotEmpty ? AppTheme.danger : AppTheme.success,
+                size: 18,
+              ),
+              title: Text(AppStrings.t('low_stock_alerts')),
+              trailing: _lowStock.isNotEmpty
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(color: AppTheme.danger, borderRadius: BorderRadius.circular(12)),
+                      child: Text('${_lowStock.length}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                    )
+                  : null,
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const InventoryScreen(initialCategoryFilter: 'Low Stock')),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
