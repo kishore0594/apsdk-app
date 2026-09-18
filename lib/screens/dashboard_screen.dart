@@ -49,6 +49,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   StreamSubscription? _salesChangeSub;
   StreamSubscription? _creditChangeSub;
+  Timer? _refreshDebounce;
 
   @override
   void initState() {
@@ -58,18 +59,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // payment entry changes — on this phone, or synced in from the other
     // one. .skip(1) drops the initial snapshot each stream fires
     // immediately on subscribing, since _load() above already covers that.
-    _salesChangeSub = _db.watchSalesRaw().skip(1).listen((_) => _load());
-    _creditChangeSub = _db.watchCreditTransactionsRaw().skip(1).listen((_) => _load());
+    //
+    // Both listeners go through _scheduleReload rather than calling
+    // _load() directly — a single credit or partial sale writes to both
+    // the sales and credit_transactions collections at once, which fires
+    // both listeners within the same instant. Calling _load() from each
+    // would start two overlapping 8-query fetches racing each other,
+    // which is what was showing as an intermittent error while online —
+    // not a real failure, just two loads colliding. Debouncing coalesces
+    // near-simultaneous triggers into a single reload.
+    _salesChangeSub = _db.watchSalesRaw().skip(1).listen((_) => _scheduleReload());
+    _creditChangeSub = _db.watchCreditTransactionsRaw().skip(1).listen((_) => _scheduleReload());
+  }
+
+  void _scheduleReload() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 700), _load);
   }
 
   @override
   void dispose() {
+    _refreshDebounce?.cancel();
     _salesChangeSub?.cancel();
     _creditChangeSub?.cancel();
     super.dispose();
   }
 
+  bool _fetchInFlight = false;
+
   Future<void> _load() async {
+    // Guards against the exact race just described: if a fetch is
+    // already running when another trigger arrives, skip starting a
+    // second overlapping one — the debounce above already coalesces
+    // near-simultaneous triggers, this is the backstop for the rest.
+    if (_fetchInFlight) return;
+    _fetchInFlight = true;
     setState(() {
       _loading = true;
       _error = null;
@@ -122,6 +146,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _loading = false;
         _error = 'Could not load dashboard: $e';
       });
+    } finally {
+      _fetchInFlight = false;
     }
   }
 

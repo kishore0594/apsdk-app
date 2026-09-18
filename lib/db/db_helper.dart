@@ -650,7 +650,12 @@ class DBHelper {
   Future<Map<String, dynamic>> getVendorInsightsSummary() async {
     final vendors = await getVendors();
     final now = DateTime.now();
-    final weekAgo = now.subtract(const Duration(days: 7)).toIso8601String();
+    // Calendar-day-aligned (midnight to midnight, last 7 days including
+    // today) — deliberately matching Reports & Trends' "Week" period
+    // exactly, rather than a rolling 168-hour window from the current
+    // minute, so the two screens' "this week" figures always agree.
+    final today = DateTime(now.year, now.month, now.day);
+    final weekAgo = today.subtract(const Duration(days: 6)).toIso8601String();
     final monthStart = DateTime(now.year, now.month, 1).toIso8601String();
     final trendCutoff = now.subtract(const Duration(days: 14)).toIso8601String();
     final attentionCutoff = now.subtract(const Duration(days: 14)).toIso8601String();

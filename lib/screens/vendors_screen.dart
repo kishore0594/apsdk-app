@@ -372,10 +372,13 @@ class _VendorsScreenState extends State<VendorsScreen> {
     }
   }
 
-  Widget _vendorCard(Map<String, dynamic> v, {double? trend}) {
+  Widget _vendorCard(Map<String, dynamic> v, {double? trend, int? daysOutstanding}) {
     final balance = (v['balance'] as num?)?.toDouble() ?? 0;
     final owes = balance > 0;
     final subtitle = _vendorSubtitle(v);
+    final daysText = daysOutstanding != null
+        ? 'Outstanding for $daysOutstanding day${daysOutstanding == 1 ? '' : 's'}'
+        : null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: AppCard(
@@ -413,6 +416,13 @@ class _VendorsScreenState extends State<VendorsScreen> {
                           child: Text(subtitle,
                               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                               overflow: TextOverflow.ellipsis),
+                        ),
+                      if (daysText != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(daysText,
+                              style: const TextStyle(
+                                  fontSize: 11.5, color: AppTheme.danger, fontWeight: FontWeight.w600)),
                         ),
                     ],
                   ),
@@ -522,6 +532,117 @@ class _VendorsScreenState extends State<VendorsScreen> {
     );
   }
 
+  void _showHelpSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const Text('What each number means',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              _helpItem(
+                Icons.account_balance_wallet_outlined,
+                AppTheme.danger,
+                'Total Outstanding',
+                'The sum every vendor currently owes, added up right now. Updates live as you record sales, credit, and payments.',
+              ),
+              _helpItem(
+                Icons.search,
+                AppTheme.primary,
+                'Search',
+                'Filters the list by name as you type. Location groups still show below — search just narrows which vendors appear inside them.',
+              ),
+              _helpItem(
+                Icons.hourglass_bottom,
+                AppTheme.warning,
+                'Avg Days Outstanding',
+                'The average — across every vendor who currently owes something — of how many days their present balance has been unpaid. A vendor who\'s fully paid up isn\'t counted.',
+              ),
+              _helpItem(
+                Icons.person_add_alt,
+                AppTheme.accent,
+                'New This Month',
+                'How many vendors have been added since the 1st of this calendar month.',
+              ),
+              _helpItem(
+                Icons.payments,
+                AppTheme.success,
+                'Collected This Week',
+                'Money collected against existing vendor debt (payments, not new credit) — for the last 7 calendar days, midnight to midnight, including today. This is the same number Reports & Trends calls "Credit Payments Collected" for the Week period — they\'re kept identical on purpose.',
+              ),
+              _helpItem(
+                Icons.priority_high,
+                AppTheme.danger,
+                'Needs Attention',
+                'Two separate conditions, both true at once — not added together:\n'
+                    '• The current balance has been unpaid for 30+ days (however old it actually is)\n'
+                    '• Nothing has happened on the account — no new credit, no payment — in the last 14 days\n'
+                    'A vendor with a 6-month-old balance qualifies too, as long as it\'s also been quiet for 2 weeks. It is not "30 days + 14 days = 45 days".',
+              ),
+              _helpItem(
+                Icons.trending_up,
+                AppTheme.danger,
+                'Trend arrow (↑ / ↓)',
+                'Only shown for vendors who currently owe money. Adds up every credit and payment in the last 14 days into one net number — red ↑ means their balance grew overall, green ↓ means it shrank overall, no arrow means barely any net movement. Long-press it for the exact amount.',
+              ),
+              _helpItem(
+                Icons.place_outlined,
+                AppTheme.accent,
+                'Location groups',
+                'Vendors are grouped by their recorded place, sorted A–Z within each group. Collapsed by default so 40+ vendors stay scannable — tap a group to open it. While you\'re searching, matching groups expand automatically so results aren\'t hidden.',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _helpItem(IconData icon, Color color, String title, String body) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          IconBadge(icon: icon, color: color, size: 18),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 4),
+                Text(body, style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700, height: 1.4)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _insightStat(IconData icon, String label, String value, Color color) {
     return Expanded(
       child: AppCard(
@@ -575,23 +696,38 @@ class _VendorsScreenState extends State<VendorsScreen> {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.danger)),
           subtitle: Text('${vendors.length} overdue 30+ days, no recent activity',
               style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-          children: vendors.map((v) => _vendorCard(v)).toList(),
+          children: vendors.map((v) => _vendorCard(v, daysOutstanding: v['days_outstanding'] as int?)).toList(),
         ),
       ),
     );
   }
 
-  Widget _locationHeader(String place, int count) {
+  Widget _locationGroup(
+    String place,
+    List<Map<String, dynamic>> vendors,
+    Map<String, dynamic> trends,
+  ) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
-      child: Row(
-        children: [
-          const Icon(Icons.place_outlined, size: 15, color: AppTheme.accent),
-          const SizedBox(width: 6),
-          Text(place, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: AppTheme.accent)),
-          const SizedBox(width: 6),
-          Text('($count)', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-        ],
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          // Collapsed by default for normal browsing — but expanded
+          // automatically while a search is active, so a match doesn't
+          // end up hidden behind a group you'd have to tap first.
+          key: PageStorageKey(place),
+          initiallyExpanded: _searchQuery.isNotEmpty,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+          childrenPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.place_outlined, size: 15, color: AppTheme.accent),
+          title: Text(place,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: AppTheme.accent)),
+          subtitle: Text('${vendors.length} vendor${vendors.length == 1 ? '' : 's'}',
+              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+          children: [
+            for (final v in vendors) _vendorCard(v, trend: (trends[v['id']] as num?)?.toDouble()),
+          ],
+        ),
       ),
     );
   }
@@ -601,6 +737,13 @@ class _VendorsScreenState extends State<VendorsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(AppStrings.t('vendor_credit')),
+        actions: [
+          IconButton(
+            tooltip: 'What do these mean?',
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => _showHelpSheet(context),
+          ),
+        ],
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _db.watchVendors(),
@@ -680,11 +823,8 @@ class _VendorsScreenState extends State<VendorsScreen> {
                                     ),
                                   )
                                 else
-                                  for (final place in locationKeys) ...[
-                                    _locationHeader(place, grouped[place]!.length),
-                                    for (final v in grouped[place]!)
-                                      _vendorCard(v, trend: (trends[v['id']] as num?)?.toDouble()),
-                                  ],
+                                  for (final place in locationKeys)
+                                    _locationGroup(place, grouped[place]!, trends),
                               ],
                             );
                           },
@@ -715,6 +855,19 @@ class VendorDetailScreen extends StatefulWidget {
 class _VendorDetailScreenState extends State<VendorDetailScreen> {
   final _db = DBHelper.instance;
   bool _saving = false;
+  late Future<int?> _daysOutstandingFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _daysOutstandingFuture = _db.getVendorOutstandingDays(widget.vendor['id'] as String);
+  }
+
+  void _refreshDaysOutstanding() {
+    setState(() {
+      _daysOutstandingFuture = _db.getVendorOutstandingDays(widget.vendor['id'] as String);
+    });
+  }
 
   Future<void> _recordTransaction(String type) async {
     if (_saving) return;
@@ -784,6 +937,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
               date: txnDate.toIso8601String(),
             )
             .timeout(const Duration(seconds: 25));
+        _refreshDaysOutstanding();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context)
@@ -838,6 +992,20 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                         color: balance > 0 ? Colors.red : Colors.green,
                       ),
                     ),
+                    if (balance > 0)
+                      FutureBuilder<int?>(
+                        future: _daysOutstandingFuture,
+                        builder: (context, snap) {
+                          if (!snap.hasData || snap.data == null) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Outstanding for ${snap.data} day${snap.data == 1 ? '' : 's'}',
+                              style: const TextStyle(fontSize: 12.5, color: Colors.black54),
+                            ),
+                          );
+                        },
+                      ),
                   ],
                 ),
               ),
