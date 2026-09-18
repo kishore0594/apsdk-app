@@ -20,6 +20,13 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _vendors = [];
+  String _searchQuery = '';
+
+  List<Map<String, dynamic>> get _filteredVendors {
+    if (_searchQuery.isEmpty) return _vendors;
+    final q = _searchQuery.toLowerCase();
+    return _vendors.where((v) => (v['name'] as String).toLowerCase().contains(q)).toList();
+  }
 
   @override
   void initState() {
@@ -50,11 +57,109 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
     Navigator.push(context, MaterialPageRoute(builder: (_) => VendorDetailScreen(vendor: v)));
   }
 
+  void _showHelpSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const Text('What each view shows', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              _helpItem(
+                Icons.search,
+                AppTheme.primary,
+                'Search',
+                'Filters by name within whichever view is currently open — the grouping/sorting stays the same, search just narrows what appears inside it.',
+              ),
+              _helpItem(
+                Icons.place_outlined,
+                AppTheme.accent,
+                'Location',
+                'Every vendor grouped by their recorded place, sorted alphabetically. Collapsed by default — tap a place to open it. Shows the total outstanding for that place if anyone there owes money.',
+              ),
+              _helpItem(
+                Icons.repeat,
+                AppTheme.accent,
+                'Frequency',
+                'Sorted by number of purchases, most frequent first — counts confirmed sales only, cancelled ones don\'t count. Shows their last purchase date too, so you can spot regulars who\'ve gone quiet.',
+              ),
+              _helpItem(
+                Icons.account_balance_wallet_outlined,
+                AppTheme.danger,
+                'Outstanding',
+                'Every vendor sorted by how much they currently owe, highest first — including vendors with nothing outstanding, at the bottom.',
+              ),
+              _helpItem(
+                Icons.hourglass_bottom,
+                AppTheme.warning,
+                'Long Pending',
+                'Vendors who owe money, grouped into aging buckets by how long their current balance has been unpaid: 0–30, 31–60, 61–90, and 90+ days. The two most urgent buckets (61–90 and 90+) open automatically; the rest stay collapsed. Each vendor shows their exact number of days.',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _helpItem(IconData icon, Color color, String title, String body) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          IconBadge(icon: icon, color: color, size: 18),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 4),
+                Text(body, style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700, height: 1.4)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.scaffold,
-      appBar: AppBar(title: Text(AppStrings.t('vendor_insights'))),
+      appBar: AppBar(
+        title: Text(AppStrings.t('vendor_insights')),
+        actions: [
+          IconButton(
+            tooltip: 'What do these mean?',
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => _showHelpSheet(context),
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -119,6 +224,15 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        decoration: const InputDecoration(
+                          hintText: 'Search by name',
+                          prefixIcon: Icon(Icons.search),
+                          isDense: true,
+                        ),
+                        onChanged: (v) => setState(() => _searchQuery = v.trim()),
+                      ),
                       const SizedBox(height: 20),
                       switch (_view) {
                         _View.location => _byLocation(),
@@ -135,9 +249,10 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   // ---------------- BY LOCATION ----------------
 
   Widget _byLocation() {
-    if (_vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
+    final vendors = _filteredVendors;
+    if (vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
     final groups = <String, List<Map<String, dynamic>>>{};
-    for (final v in _vendors) {
+    for (final v in vendors) {
       final place = (v['address'] as String? ?? '').trim();
       final key = place.isEmpty ? AppStrings.t('no_location_set') : place;
       groups.putIfAbsent(key, () => []).add(v);
@@ -180,8 +295,9 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   // ---------------- BY PURCHASE FREQUENCY ----------------
 
   Widget _byFrequency() {
-    if (_vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
-    final sorted = [..._vendors]
+    final vendors = _filteredVendors;
+    if (vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
+    final sorted = [...vendors]
       ..sort((a, b) => (b['purchase_count'] as int).compareTo(a['purchase_count'] as int));
 
     return AppCard(
@@ -193,8 +309,9 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   // ---------------- BY OUTSTANDING AMOUNT ----------------
 
   Widget _byOutstanding() {
-    if (_vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
-    final sorted = [..._vendors]..sort((a, b) => (b['balance'] as num).compareTo(a['balance'] as num));
+    final vendors = _filteredVendors;
+    if (vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
+    final sorted = [...vendors]..sort((a, b) => (b['balance'] as num).compareTo(a['balance'] as num));
 
     return AppCard(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -205,7 +322,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   // ---------------- LONG PENDING (AGING BUCKETS) ----------------
 
   Widget _longPending() {
-    final pending = _vendors.where((v) => v['days_outstanding'] != null).toList();
+    final pending = _filteredVendors.where((v) => v['days_outstanding'] != null).toList();
     if (pending.isEmpty) {
       return _emptyMessage(AppStrings.t('nobody_pending'));
     }

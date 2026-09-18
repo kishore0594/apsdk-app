@@ -5,9 +5,9 @@
 /// rather than guessing from "I installed it last week".
 class AppInfo {
   static const String appName = 'Madhura Agro Traders';
-  static const String appVersion = '1.2.0';
-  static const String buildDate = 'September 18, 2026';
+  static const String appVersion = '1.5.0';
+  static const String buildDate = 'September 18, 2026 (late night)';
 
-  /// e.g. "v1.2.0 · September 18, 2026"
+  /// e.g. "v1.5.0 · September 18, 2026 (late night)"
   static String get versionLine => 'v$appVersion · $buildDate';
 }
