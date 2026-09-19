@@ -5,8 +5,8 @@
 /// rather than guessing from "I installed it last week".
 class AppInfo {
   static const String appName = 'Madhura Agro Traders';
-  static const String appVersion = '1.9.0';
-  static const String buildDate = 'September 19, 2026 (night)';
+  static const String appVersion = '1.10.0';
+  static const String buildDate = 'September 19, 2026 (late night)';
 
   /// Required to create a new account from the Sign Up screen. This app
   /// is still single-tenant — every account sees the same store data —
@@ -24,6 +24,6 @@ class AppInfo {
   /// than intended, or swap it for a phrase of your own choosing.
   static const String signupAccessCode = 'GOLDEN-HARVEST-92';
 
-  /// e.g. "v1.9.0 · September 19, 2026 (night)"
+  /// e.g. "v1.10.0 · September 19, 2026 (late night)"
   static String get versionLine => 'v$appVersion · $buildDate';
 }

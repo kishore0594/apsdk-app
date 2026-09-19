@@ -49,29 +49,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _paymentWiseData = [];
   bool _breakdownLoading = true;
 
+  // --- Dashboard resilience: every known failure mode this screen has
+  // hit, addressed as one coherent design rather than five separate
+  // patches added over time:
+  //
+  // 1. STALE DATA — auto-refresh listens to every collection the
+  //    Dashboard's figures actually depend on (sales, credit, vendors,
+  //    products, suppliers), not just the two that happened to be
+  //    reported stale first. A supplier purchase changing stock, or a
+  //    vendor being edited, now refreshes the Dashboard exactly like a
+  //    sale does.
+  // 2. RACING RELOADS — a single credit or partial sale writes to two
+  //    collections at once (sales AND credit_transactions), which can
+  //    fire multiple listeners within the same instant. All of them
+  //    funnel through _scheduleReload's debounce, so near-simultaneous
+  //    triggers coalesce into one reload instead of several colliding.
+  // 3. HANGING ON A FLAKY (NOT ABSENT) CONNECTION — every query _load()
+  //    calls reads local cache first (see _getCacheFirst in
+  //    db_helper.dart), the same way this screen already behaves when
+  //    fully offline, so a "connected but struggling" network can't
+  //    leave it waiting on a server round-trip that never quite
+  //    finishes. The 8-second timeout below is now a backstop for a
+  //    genuinely different problem, not the primary defense.
+  // 4. UPDATING A DISPOSED SCREEN — every setState after an await is
+  //    guarded by `mounted`, so a reload that's still in flight when the
+  //    screen goes away (e.g. signing out) can't throw trying to update
+  //    something that no longer exists.
   StreamSubscription? _salesChangeSub;
   StreamSubscription? _creditChangeSub;
+  StreamSubscription? _vendorsChangeSub;
+  StreamSubscription? _productsChangeSub;
+  StreamSubscription? _suppliersChangeSub;
   Timer? _refreshDebounce;
 
   @override
   void initState() {
     super.initState();
     _load();
-    // Auto-refresh the whole dashboard the instant a sale or a credit/
-    // payment entry changes — on this phone, or synced in from the other
-    // one. .skip(1) drops the initial snapshot each stream fires
-    // immediately on subscribing, since _load() above already covers that.
-    //
-    // Both listeners go through _scheduleReload rather than calling
-    // _load() directly — a single credit or partial sale writes to both
-    // the sales and credit_transactions collections at once, which fires
-    // both listeners within the same instant. Calling _load() from each
-    // would start two overlapping 8-query fetches racing each other,
-    // which is what was showing as an intermittent error while online —
-    // not a real failure, just two loads colliding. Debouncing coalesces
-    // near-simultaneous triggers into a single reload.
+    // .skip(1) drops the initial snapshot each stream fires immediately
+    // on subscribing, since _load() above already covers that.
     _salesChangeSub = _db.watchSalesRaw().skip(1).listen((_) => _scheduleReload());
     _creditChangeSub = _db.watchCreditTransactionsRaw().skip(1).listen((_) => _scheduleReload());
+    _vendorsChangeSub = _db.watchVendorsRaw().skip(1).listen((_) => _scheduleReload());
+    _productsChangeSub = _db.watchProductsRaw().skip(1).listen((_) => _scheduleReload());
+    _suppliersChangeSub = _db.watchSuppliersRaw().skip(1).listen((_) => _scheduleReload());
   }
 
   void _scheduleReload() {
@@ -84,6 +105,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _refreshDebounce?.cancel();
     _salesChangeSub?.cancel();
     _creditChangeSub?.cancel();
+    _vendorsChangeSub?.cancel();
+    _productsChangeSub?.cancel();
+    _suppliersChangeSub?.cancel();
     super.dispose();
   }
 
@@ -120,12 +144,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _db.getTotalSupplierDues(),
         _db.getRevenueCostProfit(startIso: todayStart, endIsoExclusive: todayEnd),
       ]).timeout(
-        const Duration(seconds: 20),
-        // A timeout throws by default, which the catch block below already
-        // turns into a proper error screen with Retry — this just
-        // guarantees that happens within a bounded time instead of the
-        // spinner running indefinitely if a query is ever stuck (flaky
-        // connection, etc.).
+        const Duration(seconds: 8),
+        // Every query above now reads cache-first (see _getCacheFirst in
+        // db_helper.dart) specifically so this never has to wait out a
+        // slow or flaky server round-trip — a genuine hang past a few
+        // seconds now means something else is actually wrong, so the
+        // timeout can stay short instead of making someone wait 20
+        // seconds to find that out.
       );
       final collections = results[1] as List<Map<String, dynamic>>;
       final collectionsTotal =
@@ -225,7 +250,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final results = await Future.wait([
         _db.getProductWiseSales(startIso: start, endIsoExclusive: end),
         _db.getPaymentTypeWiseSales(startIso: start, endIsoExclusive: end),
-      ]).timeout(const Duration(seconds: 20));
+      ]).timeout(const Duration(seconds: 8));
       if (mounted) {
         setState(() {
           _productWiseData = results[0];

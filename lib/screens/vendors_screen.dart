@@ -385,6 +385,34 @@ class _VendorsScreenState extends State<VendorsScreen> {
           .showSnackBar(const SnackBar(content: Text('No phone number saved for this vendor')));
       return;
     }
+
+    // Independent of the app's own display language — the vendor
+    // receiving this may prefer a different one than whatever the store
+    // owner currently has the app set to, so this is asked fresh each
+    // time rather than reusing LocaleController's setting.
+    final language = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Send reminder in'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.language),
+              title: const Text('English'),
+              onTap: () => Navigator.pop(context, 'en'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.language),
+              title: const Text('தமிழ்'),
+              onTap: () => Navigator.pop(context, 'ta'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (language == null) return;
+
     // wa.me expects digits only, with country code — assumes a 10-digit
     // Indian number if none was included, since that's what's typically
     // entered here; a number already starting with a country code is
@@ -392,10 +420,28 @@ class _VendorsScreenState extends State<VendorsScreen> {
     var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
     if (digits.length == 10) digits = '91$digits';
     final balance = (v['balance'] as num?)?.toDouble() ?? 0;
-    final message = Uri.encodeComponent(
-      'Hi ${v['name']}, you have an outstanding balance of ${formatCurrency(balance)} '
-      'with ${AppInfo.appName}. Please pay at your earliest convenience. Thank you!',
-    );
+    // Fetched fresh each time so the reminder always states the real
+    // current number, not whatever happened to be cached when the list
+    // last loaded.
+    final days = await _db.getVendorOutstandingDays(v['id'] as String);
+
+    final String text;
+    if (language == 'ta') {
+      final daysLine = days != null ? ' இந்த தொகை $days நாட்களாக நிலுவையில் உள்ளது.' : '';
+      text = 'அன்புள்ள ${v['name']},\n\n'
+          'தங்களிடம் ${AppInfo.appName} கடையில் ${formatCurrency(balance)} நிலுவைத் தொகை '
+          'உள்ளது என்பதை நினைவூட்ட விரும்புகிறோம்.$daysLine\n\n'
+          'தயவுசெய்து விரைவில் செலுத்தி உதவவும். தங்கள் தொடர்ச்சியான ஆதரவிற்கு நன்றி.\n\n'
+          '- ${AppInfo.appName}';
+    } else {
+      final daysLine = days != null ? ', pending for $days day${days == 1 ? '' : 's'}' : '';
+      text = 'Dear ${v['name']},\n\n'
+          'This is a reminder that you have an outstanding balance of ${formatCurrency(balance)} '
+          'with ${AppInfo.appName}$daysLine.\n\n'
+          'Kindly settle this at your earliest convenience. Thank you for your continued business.\n\n'
+          '- ${AppInfo.appName}';
+    }
+    final message = Uri.encodeComponent(text);
     final url = Uri.parse('https://wa.me/$digits?text=$message');
     try {
       final launched = await launchUrl(url, mode: LaunchMode.externalApplication);

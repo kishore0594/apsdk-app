@@ -54,6 +54,41 @@ class DBHelper {
     return {...data, 'id': doc.id};
   }
 
+  /// Reads the local cache first, instantly — matching the exact
+  /// behavior confirmed by testing: fully offline, this data loads
+  /// immediately, because Firestore knows right away there's no
+  /// connection and doesn't wait on one. "Online" doesn't guarantee a
+  /// *good* connection to Firestore's servers though — a slow or flaky
+  /// one can leave a plain .get() sitting there attempting a real
+  /// round-trip that never quite finishes, which is what was showing up
+  /// as the Dashboard timing out only while "connected". Reading cache
+  /// first sidesteps that entirely for the read-only, display-only
+  /// aggregate figures (Dashboard, Reports) that don't need
+  /// split-second freshness — the app's live listeners elsewhere already
+  /// keep the cache itself updated in the background.
+  /// Falls back to a normal fetch only if the cache genuinely has
+  /// nothing for this query yet — e.g. the very first login on a brand
+  /// new device — which is the one case a cache-only read can't serve.
+  Future<QuerySnapshot> _getCacheFirst(Query query) async {
+    try {
+      return await query.get(const GetOptions(source: Source.cache));
+    } catch (_) {
+      return query.get();
+    }
+  }
+
+  /// Same idea as _getCacheFirst, for a single document instead of a
+  /// query.
+  Future<DocumentSnapshot> _getDocCacheFirst(DocumentReference ref) async {
+    try {
+      final doc = await ref.get(const GetOptions(source: Source.cache));
+      if (doc.exists) return doc;
+    } catch (_) {
+      // Falls through to a normal fetch below.
+    }
+    return ref.get();
+  }
+
   List<Map<String, dynamic>> _fromSnapshot(QuerySnapshot snap) =>
       snap.docs.map(_withId).toList();
 
@@ -106,7 +141,7 @@ class DBHelper {
   }
 
   Future<List<Map<String, dynamic>>> getLowStockProducts() async {
-    final snap = await _products.get();
+    final snap = await _getCacheFirst(_products);
     final products = _fromSnapshot(snap);
     final low = products.where((p) {
       final qty = (p['quantity'] as num?)?.toDouble() ?? 0;
@@ -360,7 +395,7 @@ class DBHelper {
   }
 
   Future<List<Map<String, dynamic>>> getVendors() async {
-    final snap = await _vendors.orderBy('name').get();
+    final snap = await _getCacheFirst(_vendors.orderBy('name'));
     return _fromSnapshot(snap);
   }
 
@@ -454,10 +489,9 @@ class DBHelper {
     // Filters only by date range here (needs no composite index, same as
     // getSales) and filters type == PAYMENT client-side afterward, rather
     // than combining an equality filter with a range filter in the query.
-    final snap = await _creditTxns
+    final snap = await _getCacheFirst(_creditTxns
         .where('date', isGreaterThanOrEqualTo: todayPrefix)
-        .where('date', isLessThan: '$todayPrefix\uf8ff')
-        .get();
+        .where('date', isLessThan: '$todayPrefix\uf8ff'));
     final list = _fromSnapshot(snap).where((t) => t['type'] == 'PAYMENT').toList();
     list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
     return list;
@@ -480,7 +514,7 @@ class DBHelper {
   }
 
   Future<double> getTotalOutstandingCredit() async {
-    final snap = await _vendors.get();
+    final snap = await _getCacheFirst(_vendors);
     double total = 0;
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -543,12 +577,12 @@ class DBHelper {
   /// of what's currently owed, not the vendor's whole history. Returns
   /// null if the vendor's balance is currently zero.
   Future<int?> getVendorOutstandingDays(String vendorId) async {
-    final vendorDoc = await _vendors.doc(vendorId).get();
+    final vendorDoc = await _getDocCacheFirst(_vendors.doc(vendorId));
     if (!vendorDoc.exists) return null;
 
     // Sorted client-side (ascending, oldest first) — see getStockHistory
     // for why the query itself has no orderBy.
-    final snap = await _creditTxns.where('vendor_id', isEqualTo: vendorId).get();
+    final snap = await _getCacheFirst(_creditTxns.where('vendor_id', isEqualTo: vendorId));
     final txns = _fromSnapshot(snap);
     txns.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
@@ -1093,6 +1127,10 @@ class DBHelper {
   /// on the Dashboard rebuilt as its own stream.
   Stream<QuerySnapshot> watchSalesRaw() => _sales.snapshots();
   Stream<QuerySnapshot> watchCreditTransactionsRaw() => _creditTxns.snapshots();
+  Stream<QuerySnapshot> watchVendorsRaw() => _vendors.snapshots();
+  Stream<QuerySnapshot> watchProductsRaw() => _products.snapshots();
+  Stream<QuerySnapshot> watchSuppliersRaw() => _suppliers.snapshots();
+  Stream<QuerySnapshot> watchSupplierTransactionsRaw() => _supplierTxns.snapshots();
 
   Future<List<Map<String, dynamic>>> getSaleItems(String saleId) async {
     final snap = await _saleItems.where('sale_id', isEqualTo: saleId).get();
@@ -1101,10 +1139,9 @@ class DBHelper {
 
   Future<double> getTodaysSalesTotal() async {
     final todayPrefix = DateTime.now().toIso8601String().substring(0, 10);
-    final snap = await _sales
+    final snap = await _getCacheFirst(_sales
         .where('date', isGreaterThanOrEqualTo: todayPrefix)
-        .where('date', isLessThan: '$todayPrefix\uf8ff')
-        .get();
+        .where('date', isLessThan: '$todayPrefix\uf8ff'));
     double total = 0;
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -1117,7 +1154,7 @@ class DBHelper {
   Future<List<Map<String, dynamic>>> getSalesSummaryByDay({int days = 7}) async {
     final start = DateTime.now().subtract(Duration(days: days - 1));
     final startPrefix = DateTime(start.year, start.month, start.day).toIso8601String();
-    final snap = await _sales.where('date', isGreaterThanOrEqualTo: startPrefix).get();
+    final snap = await _getCacheFirst(_sales.where('date', isGreaterThanOrEqualTo: startPrefix));
 
     final totalsByDay = <String, double>{};
     for (final doc in snap.docs) {
@@ -1138,10 +1175,9 @@ class DBHelper {
     required String startIso,
     required String endIsoExclusive,
   }) async {
-    final snap = await _saleItems
+    final snap = await _getCacheFirst(_saleItems
         .where('sale_date', isGreaterThanOrEqualTo: startIso)
-        .where('sale_date', isLessThan: endIsoExclusive)
-        .get();
+        .where('sale_date', isLessThan: endIsoExclusive));
     final totals = <String, double>{};
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -1160,10 +1196,9 @@ class DBHelper {
     required String startIso,
     required String endIsoExclusive,
   }) async {
-    final snap = await _sales
+    final snap = await _getCacheFirst(_sales
         .where('date', isGreaterThanOrEqualTo: startIso)
-        .where('date', isLessThan: endIsoExclusive)
-        .get();
+        .where('date', isLessThan: endIsoExclusive));
     final totals = <String, double>{};
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -1183,10 +1218,9 @@ class DBHelper {
     required String startIso,
     required String endIsoExclusive,
   }) async {
-    final salesSnap = await _sales
+    final salesSnap = await _getCacheFirst(_sales
         .where('date', isGreaterThanOrEqualTo: startIso)
-        .where('date', isLessThan: endIsoExclusive)
-        .get();
+        .where('date', isLessThan: endIsoExclusive));
     double revenue = 0;
     int count = 0;
     for (final doc in salesSnap.docs) {
@@ -1196,10 +1230,9 @@ class DBHelper {
       count++;
     }
 
-    final itemsSnap = await _saleItems
+    final itemsSnap = await _getCacheFirst(_saleItems
         .where('sale_date', isGreaterThanOrEqualTo: startIso)
-        .where('sale_date', isLessThan: endIsoExclusive)
-        .get();
+        .where('sale_date', isLessThan: endIsoExclusive));
     double cost = 0;
     for (final doc in itemsSnap.docs) {
       final data = doc.data() as Map<String, dynamic>;
@@ -1310,7 +1343,7 @@ class DBHelper {
   /// Total currently owed to all suppliers combined — the supplier-side
   /// counterpart to getTotalOutstandingCredit.
   Future<double> getTotalSupplierDues() async {
-    final snap = await _suppliers.get();
+    final snap = await _getCacheFirst(_suppliers);
     double total = 0;
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
