@@ -69,25 +69,25 @@ class DBHelper {
   /// Falls back to a normal fetch only if the cache genuinely has
   /// nothing for this query yet — e.g. the very first login on a brand
   /// new device — which is the one case a cache-only read can't serve.
-  Future<QuerySnapshot> _getCacheFirst(Query query) async {
-    try {
-      return await query.get(const GetOptions(source: Source.cache));
-    } catch (_) {
-      return query.get();
-    }
-  }
+  /// Deliberately just a plain fetch now — this used to try reading the
+  /// local cache first (Source.cache) to avoid waiting out a slow or
+  /// flaky connection, but that caused two separate real bugs: an empty
+  /// cache result silently showing as "0" instead of falling back, and —
+  /// even after fixing that — filtered queries returning a stale,
+  /// previously-resolved result set instead of picking up a document
+  /// added since, until the app was fully restarted. Firestore's
+  /// cache-only behavior for filtered queries isn't reliable enough for
+  /// this to be worth it. The original problem (hanging on a flaky-but-
+  /// connected network) is instead handled by a short timeout at the
+  /// call site — a brief wait with a clear error and Retry button is a
+  /// much smaller problem than numbers being silently wrong.
+  Future<QuerySnapshot> _getCacheFirst(Query query) => query.get();
 
   /// Same idea as _getCacheFirst, for a single document instead of a
   /// query.
-  Future<DocumentSnapshot> _getDocCacheFirst(DocumentReference ref) async {
-    try {
-      final doc = await ref.get(const GetOptions(source: Source.cache));
-      if (doc.exists) return doc;
-    } catch (_) {
-      // Falls through to a normal fetch below.
-    }
-    return ref.get();
-  }
+  /// Same reasoning as _getCacheFirst above — reverted back to a plain
+  /// fetch after the cache-first approach proved unreliable.
+  Future<DocumentSnapshot> _getDocCacheFirst(DocumentReference ref) => ref.get();
 
   List<Map<String, dynamic>> _fromSnapshot(QuerySnapshot snap) =>
       snap.docs.map(_withId).toList();
@@ -1126,6 +1126,7 @@ class DBHelper {
   /// aggregates automatically — without needing every individual metric
   /// on the Dashboard rebuilt as its own stream.
   Stream<QuerySnapshot> watchSalesRaw() => _sales.snapshots();
+  Stream<QuerySnapshot> watchSaleItemsRaw() => _saleItems.snapshots();
   Stream<QuerySnapshot> watchCreditTransactionsRaw() => _creditTxns.snapshots();
   Stream<QuerySnapshot> watchVendorsRaw() => _vendors.snapshots();
   Stream<QuerySnapshot> watchProductsRaw() => _products.snapshots();

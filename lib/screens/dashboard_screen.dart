@@ -30,6 +30,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _db = DBHelper.instance;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  // Raw data, kept live via Firestore listeners (see initState) — every
+  // number on this screen is computed from these six lists in
+  // _recompute(), never from a separate one-time fetch. A listener
+  // always emits whatever's in the local cache the instant it's
+  // subscribed to, then updates automatically as fresher data arrives —
+  // so the Dashboard shows *something* immediately on open regardless of
+  // connection quality, without the hang-or-show-stale-data tradeoff a
+  // one-time fetch forced us into (see db_helper.dart's history of this
+  // for why that approach was tried and reverted twice).
+  List<Map<String, dynamic>> _rawSales = [];
+  List<Map<String, dynamic>> _rawSaleItems = [];
+  List<Map<String, dynamic>> _rawCreditTxns = [];
+  List<Map<String, dynamic>> _rawVendors = [];
+  List<Map<String, dynamic>> _rawProducts = [];
+  List<Map<String, dynamic>> _rawSuppliers = [];
+
+  // Which of the six streams above have emitted at least once — the
+  // loading spinner clears the moment every stream has reported
+  // *something* (even an empty cache), rather than waiting on
+  // whichever one happens to be slowest to sync.
+  final Set<String> _streamsReady = {};
+  bool get _loading => _streamsReady.length < 6;
+  String? _streamError;
+
   double _todaysSales = 0;
   double _todaysCollections = 0;
   double _outstandingCredit = 0;
@@ -38,8 +62,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _lowStock = [];
   List<Map<String, dynamic>> _agingVendors = [];
   List<Map<String, dynamic>> _weeklySales = [];
-  bool _loading = true;
-  String? _error;
 
   // Sales breakdown (pie charts) state
   String _period = 'Daily'; // Daily, Weekly, Monthly, Custom
@@ -47,140 +69,252 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DateTime _customEnd = DateTime.now();
   List<Map<String, dynamic>> _productWiseData = [];
   List<Map<String, dynamic>> _paymentWiseData = [];
-  bool _breakdownLoading = true;
 
   // --- Dashboard resilience: every known failure mode this screen has
-  // hit, addressed as one coherent design rather than five separate
-  // patches added over time:
+  // hit, addressed as one coherent design:
   //
-  // 1. STALE DATA — auto-refresh listens to every collection the
-  //    Dashboard's figures actually depend on (sales, credit, vendors,
-  //    products, suppliers), not just the two that happened to be
-  //    reported stale first. A supplier purchase changing stock, or a
-  //    vendor being edited, now refreshes the Dashboard exactly like a
-  //    sale does.
-  // 2. RACING RELOADS — a single credit or partial sale writes to two
-  //    collections at once (sales AND credit_transactions), which can
-  //    fire multiple listeners within the same instant. All of them
-  //    funnel through _scheduleReload's debounce, so near-simultaneous
-  //    triggers coalesce into one reload instead of several colliding.
-  // 3. HANGING ON A FLAKY (NOT ABSENT) CONNECTION — every query _load()
-  //    calls reads local cache first (see _getCacheFirst in
-  //    db_helper.dart), the same way this screen already behaves when
-  //    fully offline, so a "connected but struggling" network can't
-  //    leave it waiting on a server round-trip that never quite
-  //    finishes. The 8-second timeout below is now a backstop for a
-  //    genuinely different problem, not the primary defense.
-  // 4. UPDATING A DISPOSED SCREEN — every setState after an await is
-  //    guarded by `mounted`, so a reload that's still in flight when the
-  //    screen goes away (e.g. signing out) can't throw trying to update
-  //    something that no longer exists.
-  StreamSubscription? _salesChangeSub;
-  StreamSubscription? _creditChangeSub;
-  StreamSubscription? _vendorsChangeSub;
-  StreamSubscription? _productsChangeSub;
-  StreamSubscription? _suppliersChangeSub;
-  Timer? _refreshDebounce;
+  // 1. STALE DATA — listens to every collection the Dashboard's figures
+  //    depend on (sales, sale_items, credit, vendors, products,
+  //    suppliers), so any change relevant to a number shown here
+  //    updates it.
+  // 2. HANGING OR SHOWING STALE DATA ON A FLAKY CONNECTION — this used
+  //    to be one-time fetches, which forced a choice between "wait out
+  //    a slow server round-trip" and "trust the local cache", and the
+  //    cache-trusting version turned out unreliable for filtered
+  //    queries (tried and reverted twice — see db_helper.dart). Live
+  //    listeners don't have that tradeoff: they emit whatever's cached
+  //    immediately on subscribing, then update automatically and
+  //    correctly as real data arrives, which is exactly the reliable
+  //    behavior that was being approximated badly before.
+  // 3. RACING RECOMPUTES — a single credit or partial sale writes to two
+  //    collections at once, which can fire multiple listeners within
+  //    the same instant. All of them funnel through a debounce, so
+  //    near-simultaneous triggers coalesce into one recompute.
+  // 4. UPDATING A DISPOSED SCREEN — _recompute() checks `mounted` before
+  //    touching state, same reasoning as every other guard in this app.
+  StreamSubscription? _salesSub;
+  StreamSubscription? _saleItemsSub;
+  StreamSubscription? _creditTxnsSub;
+  StreamSubscription? _vendorsSub;
+  StreamSubscription? _productsSub;
+  StreamSubscription? _suppliersSub;
+  Timer? _recomputeDebounce;
 
   @override
   void initState() {
     super.initState();
-    _load();
-    // .skip(1) drops the initial snapshot each stream fires immediately
-    // on subscribing, since _load() above already covers that.
-    _salesChangeSub = _db.watchSalesRaw().skip(1).listen((_) => _scheduleReload());
-    _creditChangeSub = _db.watchCreditTransactionsRaw().skip(1).listen((_) => _scheduleReload());
-    _vendorsChangeSub = _db.watchVendorsRaw().skip(1).listen((_) => _scheduleReload());
-    _productsChangeSub = _db.watchProductsRaw().skip(1).listen((_) => _scheduleReload());
-    _suppliersChangeSub = _db.watchSuppliersRaw().skip(1).listen((_) => _scheduleReload());
+    _salesSub = _db.watchSalesRaw().listen(
+      (snap) {
+        _rawSales = _snapToList(snap);
+        _streamsReady.add('sales');
+        _scheduleRecompute();
+      },
+      onError: (e) => _handleStreamError('sales', e),
+    );
+    _saleItemsSub = _db.watchSaleItemsRaw().listen(
+      (snap) {
+        _rawSaleItems = _snapToList(snap);
+        _streamsReady.add('sale_items');
+        _scheduleRecompute();
+      },
+      onError: (e) => _handleStreamError('sale items', e),
+    );
+    _creditTxnsSub = _db.watchCreditTransactionsRaw().listen(
+      (snap) {
+        _rawCreditTxns = _snapToList(snap);
+        _streamsReady.add('credit_transactions');
+        _scheduleRecompute();
+      },
+      onError: (e) => _handleStreamError('credit transactions', e),
+    );
+    _vendorsSub = _db.watchVendorsRaw().listen(
+      (snap) {
+        _rawVendors = _snapToList(snap);
+        _streamsReady.add('vendors');
+        _scheduleRecompute();
+      },
+      onError: (e) => _handleStreamError('vendors', e),
+    );
+    _productsSub = _db.watchProductsRaw().listen(
+      (snap) {
+        _rawProducts = _snapToList(snap);
+        _streamsReady.add('products');
+        _scheduleRecompute();
+      },
+      onError: (e) => _handleStreamError('products', e),
+    );
+    _suppliersSub = _db.watchSuppliersRaw().listen(
+      (snap) {
+        _rawSuppliers = _snapToList(snap);
+        _streamsReady.add('suppliers');
+        _scheduleRecompute();
+      },
+      onError: (e) => _handleStreamError('suppliers', e),
+    );
   }
 
-  void _scheduleReload() {
-    _refreshDebounce?.cancel();
-    _refreshDebounce = Timer(const Duration(milliseconds: 700), _load);
+  List<Map<String, dynamic>> _snapToList(QuerySnapshot snap) {
+    return snap.docs.map((d) {
+      final data = (d.data() as Map<String, dynamic>?) ?? {};
+      return {...data, 'id': d.id};
+    }).toList();
+  }
+
+  void _handleStreamError(String which, Object e) {
+    if (mounted) setState(() => _streamError = 'Could not sync $which: $e');
+  }
+
+  void _scheduleRecompute() {
+    // Coalesces near-simultaneous emissions into a single recompute —
+    // this is now pure, synchronous Dart over data already held in
+    // memory, not a fresh set of Firestore queries, so there's nothing
+    // left to race, hang, or go stale waiting on.
+    _recomputeDebounce?.cancel();
+    _recomputeDebounce = Timer(const Duration(milliseconds: 150), _recompute);
   }
 
   @override
   void dispose() {
-    _refreshDebounce?.cancel();
-    _salesChangeSub?.cancel();
-    _creditChangeSub?.cancel();
-    _vendorsChangeSub?.cancel();
-    _productsChangeSub?.cancel();
-    _suppliersChangeSub?.cancel();
+    _recomputeDebounce?.cancel();
+    _salesSub?.cancel();
+    _saleItemsSub?.cancel();
+    _creditTxnsSub?.cancel();
+    _vendorsSub?.cancel();
+    _productsSub?.cancel();
+    _suppliersSub?.cancel();
     super.dispose();
   }
 
-  bool _fetchInFlight = false;
+  void _recompute() {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final todayPrefix = today.toIso8601String().substring(0, 10);
+    final weekAgoPrefix = today.subtract(const Duration(days: 6)).toIso8601String();
 
-  Future<void> _load() async {
-    // Guards against the exact race just described: if a fetch is
-    // already running when another trigger arrives, skip starting a
-    // second overlapping one — the debounce above already coalesces
-    // near-simultaneous triggers, this is the backstop for the rest.
-    if (_fetchInFlight) return;
-    _fetchInFlight = true;
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
-    try {
-      final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day).toIso8601String();
-      final todayEnd = DateTime(now.year, now.month, now.day).add(const Duration(days: 1)).toIso8601String();
-
-      // Run every independent query at once instead of one after another —
-      // this is what made the Dashboard feel slow, since these used to
-      // wait on each other in sequence.
-      final results = await Future.wait([
-        _db.getTodaysSalesTotal(),
-        _db.getTodaysCollections(),
-        _db.getTotalOutstandingCredit(),
-        _db.getLowStockProducts(),
-        _db.getAgingVendors(minDays: 60),
-        _db.getSalesSummaryByDay(days: 7),
-        _db.getTotalSupplierDues(),
-        _db.getRevenueCostProfit(startIso: todayStart, endIsoExclusive: todayEnd),
-      ]).timeout(
-        const Duration(seconds: 8),
-        // Every query above now reads cache-first (see _getCacheFirst in
-        // db_helper.dart) specifically so this never has to wait out a
-        // slow or flaky server round-trip — a genuine hang past a few
-        // seconds now means something else is actually wrong, so the
-        // timeout can stay short instead of making someone wait 20
-        // seconds to find that out.
-      );
-      final collections = results[1] as List<Map<String, dynamic>>;
-      final collectionsTotal =
-          collections.fold<double>(0, (sum, c) => sum + (c['amount'] as num).toDouble());
-      final profitData = results[7] as Map<String, dynamic>;
-
-      if (mounted) {
-        setState(() {
-          _todaysSales = results[0] as double;
-          _todaysCollections = collectionsTotal;
-          _outstandingCredit = results[2] as double;
-          _lowStock = results[3] as List<Map<String, dynamic>>;
-          _agingVendors = results[4] as List<Map<String, dynamic>>;
-          _weeklySales = (results[5] as List<Map<String, dynamic>>).reversed.toList();
-          _supplierDues = results[6] as double;
-          _todaysGrossProfit = (profitData['profit'] as num?)?.toDouble() ?? 0;
-          _loading = false;
-        });
-        await _loadBreakdown();
+    double todaysSales = 0;
+    final byDay = <String, double>{};
+    for (final s in _rawSales) {
+      if (s['status'] == 'cancelled') continue;
+      final date = s['date'] as String? ?? '';
+      final amount = (s['total_amount'] as num?)?.toDouble() ?? 0;
+      if (date.startsWith(todayPrefix)) todaysSales += amount;
+      if (date.compareTo(weekAgoPrefix) >= 0) {
+        final day = date.length >= 10 ? date.substring(0, 10) : date;
+        byDay[day] = (byDay[day] ?? 0) + amount;
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = 'Could not load dashboard: $e';
-        });
-      }
-    } finally {
-      _fetchInFlight = false;
     }
+    final weeklySales = byDay.entries.map((e) => {'day': e.key, 'total': e.value}).toList()
+      ..sort((a, b) => (b['day'] as String).compareTo(a['day'] as String));
+
+    double todaysCost = 0;
+    for (final item in _rawSaleItems) {
+      if (item['status'] == 'cancelled') continue;
+      final saleDate = item['sale_date'] as String? ?? '';
+      if (!saleDate.startsWith(todayPrefix)) continue;
+      final qty = (item['quantity'] as num?)?.toDouble() ?? 0;
+      final unitCost = (item['unit_cost'] as num?)?.toDouble() ?? 0;
+      todaysCost += qty * unitCost;
+    }
+
+    double todaysCollections = 0;
+    for (final t in _rawCreditTxns) {
+      if (t['type'] != 'PAYMENT') continue;
+      final date = t['date'] as String? ?? '';
+      if (date.startsWith(todayPrefix)) todaysCollections += (t['amount'] as num?)?.toDouble() ?? 0;
+    }
+
+    double outstandingCredit = 0;
+    for (final v in _rawVendors) {
+      outstandingCredit += (v['balance'] as num?)?.toDouble() ?? 0;
+    }
+
+    // Same days-outstanding algorithm as getVendorOutstandingDays in
+    // db_helper.dart, computed per vendor from the in-memory
+    // credit_transactions list instead of a fresh per-vendor query.
+    final txnsByVendor = <String, List<Map<String, dynamic>>>{};
+    for (final t in _rawCreditTxns) {
+      final vendorId = t['vendor_id'] as String?;
+      if (vendorId == null) continue;
+      txnsByVendor.putIfAbsent(vendorId, () => []).add(t);
+    }
+    final agingVendors = <Map<String, dynamic>>[];
+    for (final v in _rawVendors) {
+      final balance = (v['balance'] as num?)?.toDouble() ?? 0;
+      if (balance <= 0) continue;
+      final vendorId = v['id'] as String;
+      final txns = [...(txnsByVendor[vendorId] ?? [])]
+        ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+      double runningBalance = 0;
+      DateTime? openedSince;
+      for (final t in txns) {
+        final amount = (t['amount'] as num).toDouble();
+        runningBalance = t['type'] == 'CREDIT' ? runningBalance + amount : runningBalance - amount;
+        if (runningBalance <= 0) {
+          openedSince = null;
+        } else if (openedSince == null) {
+          openedSince = DateTime.tryParse(t['date'] as String);
+        }
+      }
+      if (runningBalance <= 0 || openedSince == null) continue;
+      final days = now.difference(openedSince).inDays;
+      if (days >= 60) {
+        agingVendors.add({...v, 'balance': balance, 'days_outstanding': days});
+      }
+    }
+    agingVendors.sort((a, b) => (b['days_outstanding'] as int).compareTo(a['days_outstanding'] as int));
+
+    final lowStock = _rawProducts.where((p) {
+      final qty = (p['quantity'] as num?)?.toDouble() ?? 0;
+      final reorder = (p['reorder_level'] as num?)?.toDouble() ?? 0;
+      return qty <= reorder;
+    }).toList()
+      ..sort((a, b) => ((a['quantity'] as num?) ?? 0).compareTo((b['quantity'] as num?) ?? 0));
+
+    double supplierDues = 0;
+    for (final s in _rawSuppliers) {
+      supplierDues += (s['balance'] as num?)?.toDouble() ?? 0;
+    }
+
+    // Breakdown (product-wise / payment-type-wise) for whichever period
+    // is currently selected — recomputed here too rather than via a
+    // separate fetch, so switching Daily/Weekly/Monthly/Custom is
+    // instant.
+    final (periodStart, periodEnd) = _periodRange();
+    final productTotals = <String, double>{};
+    final paymentTotals = <String, double>{};
+    for (final item in _rawSaleItems) {
+      if (item['status'] == 'cancelled') continue;
+      final saleDate = item['sale_date'] as String? ?? '';
+      if (saleDate.compareTo(periodStart) < 0 || saleDate.compareTo(periodEnd) >= 0) continue;
+      final name = item['product_name'] as String? ?? '';
+      productTotals[name] = (productTotals[name] ?? 0) + ((item['subtotal'] as num?)?.toDouble() ?? 0);
+    }
+    for (final s in _rawSales) {
+      if (s['status'] == 'cancelled') continue;
+      final date = s['date'] as String? ?? '';
+      if (date.compareTo(periodStart) < 0 || date.compareTo(periodEnd) >= 0) continue;
+      final type = s['payment_type'] as String? ?? '';
+      paymentTotals[type] = (paymentTotals[type] ?? 0) + ((s['total_amount'] as num?)?.toDouble() ?? 0);
+    }
+    final productWiseData = productTotals.entries.map((e) => {'name': e.key, 'total': e.value}).toList()
+      ..sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    final paymentWiseData =
+        paymentTotals.entries.map((e) => {'payment_type': e.key, 'total': e.value}).toList();
+
+    setState(() {
+      _todaysSales = todaysSales;
+      _todaysCollections = todaysCollections;
+      _outstandingCredit = outstandingCredit;
+      _lowStock = lowStock;
+      _agingVendors = agingVendors;
+      _weeklySales = weeklySales.reversed.toList();
+      _supplierDues = supplierDues;
+      _todaysGrossProfit = todaysSales - todaysCost;
+      _productWiseData = productWiseData;
+      _paymentWiseData = paymentWiseData;
+      _streamError = null;
+    });
   }
 
   /// Returns the start/endExclusive ISO8601 range for the current
@@ -243,26 +377,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _loadBreakdown() async {
-    if (mounted) setState(() => _breakdownLoading = true);
-    try {
-      final (start, end) = _periodRange();
-      final results = await Future.wait([
-        _db.getProductWiseSales(startIso: start, endIsoExclusive: end),
-        _db.getPaymentTypeWiseSales(startIso: start, endIsoExclusive: end),
-      ]).timeout(const Duration(seconds: 8));
-      if (mounted) {
-        setState(() {
-          _productWiseData = results[0];
-          _paymentWiseData = results[1];
-          _breakdownLoading = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _breakdownLoading = false);
-    }
-  }
-
   Future<void> _pickCustomRange() async {
     final range = await showDateRangePicker(
       context: context,
@@ -276,7 +390,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _customEnd = range.end;
         _period = 'Custom';
       });
-      _loadBreakdown();
+      _recompute();
     }
   }
 
@@ -339,7 +453,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Positioned.fill(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : _error != null
+                : _streamError != null
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -348,15 +462,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       children: [
                         const Icon(Icons.error_outline, color: Colors.red, size: 40),
                         const SizedBox(height: 12),
-                        Text(_error!, textAlign: TextAlign.center),
+                        Text(_streamError!, textAlign: TextAlign.center),
                         const SizedBox(height: 16),
-                        FilledButton(onPressed: _load, child: const Text('Retry')),
+                        FilledButton(
+                          onPressed: () => setState(() => _streamError = null),
+                          child: const Text('Dismiss'),
+                        ),
                       ],
                     ),
                   ),
                 )
               : RefreshIndicator(
-              onRefresh: _load,
+              // There's no separate fetch to trigger anymore — every
+              // figure is already live — but pulling to refresh is a
+              // familiar gesture people expect to do *something*, so
+              // this just re-runs the same synchronous computation
+              // against whatever's currently held in memory. Near-
+              // instant, and harmless to call whenever.
+              onRefresh: () async => _recompute(),
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
@@ -442,7 +565,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         _pickCustomRange();
                       } else {
                         setState(() => _period = choice);
-                        _loadBreakdown();
+                        _recompute();
                       }
                     },
                   ),
@@ -455,27 +578,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                   const SizedBox(height: 12),
-                  if (_breakdownLoading)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  else ...[
-                    _PieChartCard(
-                      title: 'Sales by Product',
-                      data: _productWiseData
-                          .map((d) => _PieSlice(label: d['name'] as String, value: (d['total'] as num).toDouble()))
-                          .toList(),
-                    ),
-                    const SizedBox(height: 20),
-                    _PieChartCard(
-                      title: 'Cash vs Credit',
-                      data: _paymentWiseData
-                          .map((d) => _PieSlice(
-                              label: d['payment_type'] as String, value: (d['total'] as num).toDouble()))
-                          .toList(),
-                    ),
-                  ],
+                  _PieChartCard(
+                    title: 'Sales by Product',
+                    data: _productWiseData
+                        .map((d) => _PieSlice(label: d['name'] as String, value: (d['total'] as num).toDouble()))
+                        .toList(),
+                  ),
+                  const SizedBox(height: 20),
+                  _PieChartCard(
+                    title: 'Cash vs Credit',
+                    data: _paymentWiseData
+                        .map((d) => _PieSlice(
+                            label: d['payment_type'] as String, value: (d['total'] as num).toDouble()))
+                        .toList(),
+                  ),
                   const SizedBox(height: 24),
                   Row(
                     children: [
