@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:convert';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
@@ -230,6 +232,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           final low = qty <= reorder;
                           final statusColor = low ? AppTheme.danger : AppTheme.success;
                           final noCost = ((p['cost_price'] as num?)?.toDouble() ?? 0) <= 0;
+                          final photo = p['photo'] as String?;
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: AppCard(
@@ -238,11 +241,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               onLongPress: () => _openStockHistory(p),
                               child: Row(
                                 children: [
-                                  IconBadge(
-                                    icon: low ? Icons.warning_amber_rounded : Icons.inventory_2_outlined,
-                                    color: statusColor,
-                                    size: 20,
-                                  ),
+                                  photo != null
+                                      ? ClipRRect(
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: Image.memory(base64Decode(photo),
+                                              width: 40, height: 40, fit: BoxFit.cover),
+                                        )
+                                      : IconBadge(
+                                          icon: low ? Icons.warning_amber_rounded : Icons.inventory_2_outlined,
+                                          color: statusColor,
+                                          size: 20,
+                                        ),
                                   const SizedBox(width: 13),
                                   Expanded(
                                     child: Column(
@@ -327,6 +336,7 @@ class _ProductFormState extends State<_ProductForm> {
   late final TextEditingController _sellingPrice;
   String? _supplierId;
   List<Map<String, dynamic>> _suppliers = [];
+  String? _photoBase64;
 
   @override
   void initState() {
@@ -345,7 +355,22 @@ class _ProductFormState extends State<_ProductForm> {
     _costPrice.addListener(() => setState(() {}));
     _sellingPrice = TextEditingController(text: (p?['selling_price'] ?? 0).toString());
     _supplierId = p?['supplier_id'] as String?;
+    _photoBase64 = p?['photo'] as String?;
     _loadSuppliers();
+  }
+
+  Future<void> _pickPhoto() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      // Resized and compressed at pick time — keeps the encoded result
+      // comfortably under Firestore's per-document size limit without
+      // needing a separate image-processing package.
+      maxWidth: 800,
+      imageQuality: 70,
+    );
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    setState(() => _photoBase64 = base64Encode(bytes));
   }
 
   Future<void> _loadSuppliers() async {
@@ -425,6 +450,7 @@ class _ProductFormState extends State<_ProductForm> {
       'cost_price': costPrice,
       'selling_price': double.tryParse(_sellingPrice.text) ?? 0,
       'supplier_id': _supplierId,
+      'photo': _photoBase64,
       'updated_at': now,
     };
     if (widget.product == null) {
@@ -458,6 +484,39 @@ class _ProductFormState extends State<_ProductForm> {
             children: [
               Text(widget.product == null ? 'Add Product' : 'Edit Product',
                   style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 16),
+              Center(
+                child: GestureDetector(
+                  onTap: _pickPhoto,
+                  child: Stack(
+                    alignment: Alignment.bottomRight,
+                    children: [
+                      Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: _photoBase64 != null
+                            ? Image.memory(base64Decode(_photoBase64!), fit: BoxFit.cover)
+                            : Icon(Icons.add_a_photo_outlined, color: Colors.grey.shade400, size: 28),
+                      ),
+                      if (_photoBase64 != null)
+                        GestureDetector(
+                          onTap: () => setState(() => _photoBase64 = null),
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(color: AppTheme.danger, shape: BoxShape.circle),
+                            child: const Icon(Icons.close, color: Colors.white, size: 14),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _name,

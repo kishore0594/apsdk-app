@@ -19,6 +19,7 @@ import 'reports_screen.dart';
 import 'inventory_screen.dart';
 import 'expenses_screen.dart';
 import 'change_password_screen.dart';
+import 'promotions_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -755,6 +756,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen()));
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.campaign_outlined, color: AppTheme.accent, size: 18),
+              title: const Text('Promotions'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const PromotionsScreen()));
               },
             ),
           ],

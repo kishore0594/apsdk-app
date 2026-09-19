@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'dart:convert';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
@@ -695,8 +696,16 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                               itemCount: options.length,
                               itemBuilder: (context, i) {
                                 final p = options.elementAt(i);
+                                final photo = p['photo'] as String?;
                                 return ListTile(
                                   dense: true,
+                                  leading: photo != null
+                                      ? ClipRRect(
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: Image.memory(base64Decode(photo),
+                                              width: 32, height: 32, fit: BoxFit.cover),
+                                        )
+                                      : null,
                                   title: Text(p['name'] as String),
                                   subtitle: Text(
                                       '${formatCurrency(p['selling_price'])}/${p['unit']} • stock ${p['quantity']}'),
