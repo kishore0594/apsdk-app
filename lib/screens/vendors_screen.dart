@@ -5,6 +5,7 @@ import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_info.dart';
+import '../utils/user_role.dart';
 
 class VendorsScreen extends StatefulWidget {
   const VendorsScreen({super.key});
@@ -546,35 +547,38 @@ class _VendorsScreenState extends State<VendorsScreen> {
                     ),
                   ],
                 ),
-                PopupMenuButton<String>(
-                  icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
-                  padding: EdgeInsets.zero,
-                  onSelected: (choice) {
-                    if (choice == 'edit') {
-                      _editVendor(v);
-                    } else if (choice == 'delete') {
-                      _deleteVendor(v);
-                    }
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'edit',
-                      child: ListTile(
-                        leading: const Icon(Icons.edit_outlined),
-                        title: Text(AppStrings.t('edit')),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'delete',
-                      child: ListTile(
-                        leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
-                        title: Text(AppStrings.t('delete'), style: const TextStyle(color: AppTheme.danger)),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ),
-                  ],
-                ),
+                UserRole.instance.isAdmin
+                    ? PopupMenuButton<String>(
+                        icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
+                        padding: EdgeInsets.zero,
+                        onSelected: (choice) {
+                          if (choice == 'edit') {
+                            _editVendor(v);
+                          } else if (choice == 'delete') {
+                            _deleteVendor(v);
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: ListTile(
+                              leading: const Icon(Icons.edit_outlined),
+                              title: Text(AppStrings.t('edit')),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: ListTile(
+                              leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
+                              title:
+                                  Text(AppStrings.t('delete'), style: const TextStyle(color: AppTheme.danger)),
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                          ),
+                        ],
+                      )
+                    : const SizedBox.shrink(),
               ],
             ),
             if (owes) ...[
@@ -592,32 +596,34 @@ class _VendorsScreenState extends State<VendorsScreen> {
                       style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _busyVendorIds.contains(v['id'])
-                          ? null
-                          : () => _quickCollectPayment(v['id'] as String, v['name'] as String),
-                      icon: _busyVendorIds.contains(v['id'])
-                          ? const SizedBox(
-                              height: 14,
-                              width: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.payments_outlined, size: 16),
-                      label: Text(AppStrings.t('payment')),
-                      style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
+                  if (UserRole.instance.isAdmin) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _busyVendorIds.contains(v['id'])
+                            ? null
+                            : () => _quickCollectPayment(v['id'] as String, v['name'] as String),
+                        icon: _busyVendorIds.contains(v['id'])
+                            ? const SizedBox(
+                                height: 14,
+                                width: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.payments_outlined, size: 16),
+                        label: Text(AppStrings.t('payment')),
+                        style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filledTonal(
-                    tooltip: 'Remind on WhatsApp',
-                    onPressed: () => _sendWhatsAppReminder(v),
-                    icon: const Icon(Icons.chat_outlined, size: 18),
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
-                      foregroundColor: const Color(0xFF128C7E),
+                    const SizedBox(width: 8),
+                    IconButton.filledTonal(
+                      tooltip: 'Remind on WhatsApp',
+                      onPressed: () => _sendWhatsAppReminder(v),
+                      icon: const Icon(Icons.chat_outlined, size: 18),
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
+                        foregroundColor: const Color(0xFF128C7E),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ],
@@ -883,11 +889,13 @@ class _VendorsScreenState extends State<VendorsScreen> {
                           icon: Icons.people_outline,
                           title: 'No credit customers yet',
                           message: 'Add a vendor to start tracking what they owe.',
-                          action: FilledButton.icon(
-                            onPressed: _addVendor,
-                            icon: const Icon(Icons.person_add, size: 18),
-                            label: Text(AppStrings.t('add_vendor')),
-                          ),
+                          action: UserRole.instance.isAdmin
+                              ? FilledButton.icon(
+                                  onPressed: _addVendor,
+                                  icon: const Icon(Icons.person_add, size: 18),
+                                  label: Text(AppStrings.t('add_vendor')),
+                                )
+                              : null,
                         )
                       : FutureBuilder<Map<String, dynamic>>(
                           future: _insightsFuture,
@@ -930,11 +938,13 @@ class _VendorsScreenState extends State<VendorsScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addVendor,
-        icon: const Icon(Icons.person_add),
-        label: Text(AppStrings.t('add_vendor')),
-      ),
+      floatingActionButton: UserRole.instance.isAdmin
+          ? FloatingActionButton.extended(
+              onPressed: _addVendor,
+              icon: const Icon(Icons.person_add),
+              label: Text(AppStrings.t('add_vendor')),
+            )
+          : null,
     );
   }
 }
@@ -1104,33 +1114,34 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _saving ? null : () => _recordTransaction('CREDIT'),
-                        icon: const Icon(Icons.add),
-                        label: Text(AppStrings.t('add_credit')),
+              if (UserRole.instance.isAdmin)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _saving ? null : () => _recordTransaction('CREDIT'),
+                          icon: const Icon(Icons.add),
+                          label: Text(AppStrings.t('add_credit')),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _saving ? null : () => _recordTransaction('PAYMENT'),
-                        icon: _saving
-                            ? const SizedBox(
-                                height: 14,
-                                width: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.payments),
-                        label: Text(AppStrings.t('collect_payment')),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _saving ? null : () => _recordTransaction('PAYMENT'),
+                          icon: _saving
+                              ? const SizedBox(
+                                  height: 14,
+                                  width: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.payments),
+                          label: Text(AppStrings.t('collect_payment')),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               const Divider(height: 1),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../db/db_helper.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_logo.dart';
 import '../utils/app_info.dart';
@@ -84,10 +85,16 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     try {
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+      final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: _emailCtrl.text.trim(),
         password: _passwordCtrl.text,
       );
+      final uid = credential.user?.uid;
+      if (uid != null) {
+        // Defaults every new account to view-only — an admin upgrades
+        // someone deliberately via Manage Users, never by accident.
+        await DBHelper.instance.createUserRoleDoc(uid, _emailCtrl.text.trim());
+      }
       // On success, same as sign-in — main.dart's auth listener takes it
       // from here.
     } on FirebaseAuthException catch (e) {

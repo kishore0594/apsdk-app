@@ -8,6 +8,7 @@ import '../utils/formatters.dart';
 import '../utils/app_logo.dart';
 import '../utils/app_theme.dart';
 import '../utils/locale_controller.dart';
+import '../utils/user_role.dart';
 import '../utils/app_strings.dart';
 import 'sales_screen.dart';
 import 'vendors_screen.dart';
@@ -20,6 +21,7 @@ import 'inventory_screen.dart';
 import 'expenses_screen.dart';
 import 'change_password_screen.dart';
 import 'promotions_screen.dart';
+import 'manage_users_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -422,6 +424,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         actions: [
+          if (UserRole.instance.isViewer)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Chip(
+                label: const Text('View Only', style: TextStyle(fontSize: 11, color: Colors.white)),
+                backgroundColor: Colors.white.withOpacity(0.2),
+                visualDensity: VisualDensity.compact,
+                side: BorderSide.none,
+              ),
+            ),
           IconButton(
             tooltip: AppStrings.t('language'),
             icon: const Icon(Icons.language),
@@ -445,6 +457,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               );
               if (confirm == true) {
                 await FirebaseAuth.instance.signOut();
+                UserRole.instance.reset();
               }
             },
           ),
@@ -758,14 +771,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen()));
               },
             ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.campaign_outlined, color: AppTheme.accent, size: 18),
-              title: const Text('Promotions'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const PromotionsScreen()));
-              },
-            ),
+            if (UserRole.instance.isAdmin) ...[
+              ListTile(
+                leading: const IconBadge(icon: Icons.campaign_outlined, color: AppTheme.accent, size: 18),
+                title: const Text('Promotions'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const PromotionsScreen()));
+                },
+              ),
+              ListTile(
+                leading: const IconBadge(icon: Icons.manage_accounts_outlined, color: AppTheme.primary, size: 18),
+                title: const Text('Manage Users'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ManageUsersScreen()));
+                },
+              ),
+            ],
           ],
         ),
       ),

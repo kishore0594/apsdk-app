@@ -3,6 +3,7 @@ import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
+import '../utils/user_role.dart';
 
 class SuppliersScreen extends StatefulWidget {
   const SuppliersScreen({super.key});
@@ -199,11 +200,13 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                     ? EmptyState(
                         icon: Icons.local_shipping_outlined,
                         title: AppStrings.t('no_suppliers_tap_add'),
-                        action: FilledButton.icon(
-                          onPressed: _addSupplier,
-                          icon: const Icon(Icons.add_business, size: 18),
-                          label: Text(AppStrings.t('add_supplier')),
-                        ),
+                        action: UserRole.instance.isAdmin
+                            ? FilledButton.icon(
+                                onPressed: _addSupplier,
+                                icon: const Icon(Icons.add_business, size: 18),
+                                label: Text(AppStrings.t('add_supplier')),
+                              )
+                            : null,
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.fromLTRB(14, 10, 14, 90),
@@ -268,39 +271,42 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
                                               )),
                                         ],
                                       ),
-                                      PopupMenuButton<String>(
-                                        icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
-                                        padding: EdgeInsets.zero,
-                                        onSelected: (choice) {
-                                          if (choice == 'edit') {
-                                            _editSupplier(s);
-                                          } else if (choice == 'delete') {
-                                            _deleteSupplier(s);
-                                          }
-                                        },
-                                        itemBuilder: (_) => [
-                                          PopupMenuItem(
-                                            value: 'edit',
-                                            child: ListTile(
-                                              leading: const Icon(Icons.edit_outlined),
-                                              title: Text(AppStrings.t('edit')),
-                                              contentPadding: EdgeInsets.zero,
-                                            ),
-                                          ),
-                                          PopupMenuItem(
-                                            value: 'delete',
-                                            child: ListTile(
-                                              leading: const Icon(Icons.delete_outline, color: AppTheme.danger),
-                                              title: Text(AppStrings.t('delete'),
-                                                  style: const TextStyle(color: AppTheme.danger)),
-                                              contentPadding: EdgeInsets.zero,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                      UserRole.instance.isAdmin
+                                          ? PopupMenuButton<String>(
+                                              icon: Icon(Icons.more_vert, color: Colors.grey.shade500, size: 20),
+                                              padding: EdgeInsets.zero,
+                                              onSelected: (choice) {
+                                                if (choice == 'edit') {
+                                                  _editSupplier(s);
+                                                } else if (choice == 'delete') {
+                                                  _deleteSupplier(s);
+                                                }
+                                              },
+                                              itemBuilder: (_) => [
+                                                PopupMenuItem(
+                                                  value: 'edit',
+                                                  child: ListTile(
+                                                    leading: const Icon(Icons.edit_outlined),
+                                                    title: Text(AppStrings.t('edit')),
+                                                    contentPadding: EdgeInsets.zero,
+                                                  ),
+                                                ),
+                                                PopupMenuItem(
+                                                  value: 'delete',
+                                                  child: ListTile(
+                                                    leading:
+                                                        const Icon(Icons.delete_outline, color: AppTheme.danger),
+                                                    title: Text(AppStrings.t('delete'),
+                                                        style: const TextStyle(color: AppTheme.danger)),
+                                                    contentPadding: EdgeInsets.zero,
+                                                  ),
+                                                ),
+                                              ],
+                                            )
+                                          : const SizedBox.shrink(),
                                     ],
                                   ),
-                                  if (owes) ...[
+                                  if (owes && UserRole.instance.isAdmin) ...[
                                     const Divider(height: 22),
                                     SizedBox(
                                       width: double.infinity,
@@ -333,7 +339,9 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(onPressed: _addSupplier, child: const Icon(Icons.add_business)),
+      floatingActionButton: UserRole.instance.isAdmin
+          ? FloatingActionButton(onPressed: _addSupplier, child: const Icon(Icons.add_business))
+          : null,
     );
   }
 }
@@ -442,33 +450,34 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _openNewPurchase,
-                        icon: const Icon(Icons.local_shipping),
-                        label: Text(AppStrings.t('new_purchase')),
+              if (UserRole.instance.isAdmin)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _openNewPurchase,
+                          icon: const Icon(Icons.local_shipping),
+                          label: Text(AppStrings.t('new_purchase')),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _saving ? null : _recordPayment,
-                        icon: _saving
-                            ? const SizedBox(
-                                height: 14,
-                                width: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.payments),
-                        label: Text(AppStrings.t('pay_supplier')),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _saving ? null : _recordPayment,
+                          icon: _saving
+                              ? const SizedBox(
+                                  height: 14,
+                                  width: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.payments),
+                          label: Text(AppStrings.t('pay_supplier')),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
               const Divider(height: 1),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
+import '../utils/user_role.dart';
 
 const List<String> kExpenseCategories = [
   'Rent',
@@ -121,7 +122,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+            if (UserRole.instance.isAdmin)
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
           ],
         ),
       ),
@@ -256,11 +258,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                         icon: Icons.receipt_long_outlined,
                         title: 'No expenses recorded for this period',
                         message: 'Add rent, electricity, wages, or other overhead to see a real profit number.',
-                        action: FilledButton.icon(
-                          onPressed: () => _openExpenseForm(),
-                          icon: const Icon(Icons.add, size: 18),
-                          label: const Text('Add Expense'),
-                        ),
+                        action: UserRole.instance.isAdmin
+                            ? FilledButton.icon(
+                                onPressed: () => _openExpenseForm(),
+                                icon: const Icon(Icons.add, size: 18),
+                                label: const Text('Add Expense'),
+                              )
+                            : null,
                       )
                     else
                       for (final e in expenses)
@@ -269,7 +273,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                           child: AppCard(
                             padding: const EdgeInsets.all(14),
                             onTap: () => _openExpenseForm(expense: e),
-                            onLongPress: () => _confirmDelete(e),
+                            onLongPress: UserRole.instance.isAdmin ? () => _confirmDelete(e) : null,
                             child: Row(
                               children: [
                                 const IconBadge(icon: Icons.receipt_long_outlined, color: AppTheme.cost, size: 18),
@@ -305,11 +309,13 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openExpenseForm(),
-        icon: const Icon(Icons.add),
-        label: const Text('Add Expense'),
-      ),
+      floatingActionButton: UserRole.instance.isAdmin
+          ? FloatingActionButton.extended(
+              onPressed: () => _openExpenseForm(),
+              icon: const Icon(Icons.add),
+              label: const Text('Add Expense'),
+            )
+          : null,
     );
   }
 }

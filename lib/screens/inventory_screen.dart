@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
+import '../utils/user_role.dart';
 import '../utils/app_theme.dart';
 
 class InventoryScreen extends StatefulWidget {
@@ -304,10 +305,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openProductForm(),
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: UserRole.instance.isAdmin
+          ? FloatingActionButton(
+              onPressed: () => _openProductForm(),
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 }
@@ -614,15 +617,17 @@ class _ProductFormState extends State<_ProductForm> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Add new supplier',
-                    onPressed: _quickAddSupplier,
-                    icon: const Icon(Icons.add_business),
-                  ),
+                  if (UserRole.instance.isAdmin)
+                    IconButton(
+                      tooltip: 'Add new supplier',
+                      onPressed: _quickAddSupplier,
+                      icon: const Icon(Icons.add_business),
+                    ),
                 ],
               ),
               const SizedBox(height: 20),
-              FilledButton(onPressed: _save, child: Text(AppStrings.t('save_product'))),
+              if (UserRole.instance.isAdmin)
+                FilledButton(onPressed: _save, child: Text(AppStrings.t('save_product'))),
               const SizedBox(height: 8),
               OutlinedButton(
                 onPressed: () => Navigator.pop(context),

@@ -5,6 +5,7 @@ import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
+import '../utils/user_role.dart';
 
 // Units sold by weight/volume need decimal quantities (e.g. 0.75 Kgs).
 // Count-based units (Nos, Box, Dozen, Packet...) stay whole numbers.
@@ -218,7 +219,7 @@ class _SalesScreenState extends State<SalesScreen> {
                   );
                 }),
               ),
-            if (!isCancelled) ...[
+            if (!isCancelled && UserRole.instance.isAdmin) ...[
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -382,13 +383,15 @@ class _SalesScreenState extends State<SalesScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          await Navigator.push(context, MaterialPageRoute(builder: (_) => const NewSaleScreen()));
-          _loadTrend();
-        },
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: UserRole.instance.isAdmin
+          ? FloatingActionButton(
+              onPressed: () async {
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => const NewSaleScreen()));
+                _loadTrend();
+              },
+              child: const Icon(Icons.add),
+            )
+          : null,
     );
   }
 }

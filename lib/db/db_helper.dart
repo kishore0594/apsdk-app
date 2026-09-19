@@ -780,6 +780,31 @@ class DBHelper {
     };
   }
 
+  // ---------------- USER ROLES ----------------
+  // Firestore is the source of truth for who's an admin vs. a view-only
+  // account — Firebase Auth itself has no client-accessible way to list
+  // or manage other accounts, so this collection doubles as the "who has
+  // an account" directory. An account with no document here is treated
+  // as admin everywhere this is checked (see UserRole) — which is what
+  // keeps the two original accounts, created before this system existed,
+  // working unchanged.
+
+  Future<void> createUserRoleDoc(String uid, String email) async {
+    await _fs.collection('users').doc(uid).set({
+      'email': email,
+      'role': 'viewer',
+      'created_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  Stream<List<Map<String, dynamic>>> watchUserRoles() {
+    return _fs.collection('users').snapshots().map(_fromSnapshot);
+  }
+
+  Future<void> setUserRole(String uid, String role) async {
+    await _fs.collection('users').doc(uid).set({'role': role}, SetOptions(merge: true));
+  }
+
   // ---------------- OPERATING EXPENSES ----------------
   // Rent, electricity, wages, transport — real overhead that Gross Profit
   // (revenue minus cost of goods sold) never accounted for. Reports &

@@ -6,6 +6,7 @@ import 'utils/app_theme.dart';
 import 'utils/app_logo.dart';
 import 'utils/locale_controller.dart';
 import 'utils/app_strings.dart';
+import 'utils/user_role.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -96,6 +97,15 @@ class RootNav extends StatefulWidget {
 
 class _RootNavState extends State<RootNav> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Fetched once per sign-in (RootNav only exists while signed in —
+    // see AuthGate) rather than re-fetched by every screen that needs
+    // to know the role.
+    UserRole.instance.load();
+  }
 
   final _screens = const [
     DashboardScreen(),
