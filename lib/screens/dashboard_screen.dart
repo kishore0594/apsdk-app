@@ -16,6 +16,8 @@ import 'data_sync_screen.dart';
 import 'suppliers_screen.dart';
 import 'reports_screen.dart';
 import 'inventory_screen.dart';
+import 'expenses_screen.dart';
+import 'change_password_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -94,10 +96,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // near-simultaneous triggers, this is the backstop for the rest.
     if (_fetchInFlight) return;
     _fetchInFlight = true;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day).toIso8601String();
@@ -128,24 +132,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
           collections.fold<double>(0, (sum, c) => sum + (c['amount'] as num).toDouble());
       final profitData = results[7] as Map<String, dynamic>;
 
-      setState(() {
-        _todaysSales = results[0] as double;
-        _todaysCollections = collectionsTotal;
-        _outstandingCredit = results[2] as double;
-        _lowStock = results[3] as List<Map<String, dynamic>>;
-        _agingVendors = results[4] as List<Map<String, dynamic>>;
-        _weeklySales = (results[5] as List<Map<String, dynamic>>).reversed.toList();
-        _supplierDues = results[6] as double;
-        _todaysGrossProfit = (profitData['profit'] as num?)?.toDouble() ?? 0;
-        _loading = false;
-      });
-
-      await _loadBreakdown();
+      if (mounted) {
+        setState(() {
+          _todaysSales = results[0] as double;
+          _todaysCollections = collectionsTotal;
+          _outstandingCredit = results[2] as double;
+          _lowStock = results[3] as List<Map<String, dynamic>>;
+          _agingVendors = results[4] as List<Map<String, dynamic>>;
+          _weeklySales = (results[5] as List<Map<String, dynamic>>).reversed.toList();
+          _supplierDues = results[6] as double;
+          _todaysGrossProfit = (profitData['profit'] as num?)?.toDouble() ?? 0;
+          _loading = false;
+        });
+        await _loadBreakdown();
+      }
     } catch (e) {
-      setState(() {
-        _loading = false;
-        _error = 'Could not load dashboard: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Could not load dashboard: $e';
+        });
+      }
     } finally {
       _fetchInFlight = false;
     }
@@ -212,20 +219,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadBreakdown() async {
-    setState(() => _breakdownLoading = true);
+    if (mounted) setState(() => _breakdownLoading = true);
     try {
       final (start, end) = _periodRange();
       final results = await Future.wait([
         _db.getProductWiseSales(startIso: start, endIsoExclusive: end),
         _db.getPaymentTypeWiseSales(startIso: start, endIsoExclusive: end),
       ]).timeout(const Duration(seconds: 20));
-      setState(() {
-        _productWiseData = results[0];
-        _paymentWiseData = results[1];
-        _breakdownLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _productWiseData = results[0];
+          _paymentWiseData = results[1];
+          _breakdownLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _breakdownLoading = false);
+      if (mounted) setState(() => _breakdownLoading = false);
     }
   }
 
@@ -236,7 +245,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       lastDate: DateTime.now(),
       initialDateRange: DateTimeRange(start: _customStart, end: _customEnd),
     );
-    if (range != null) {
+    if (range != null && mounted) {
       setState(() {
         _customStart = range.start;
         _customEnd = range.end;
@@ -588,6 +597,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   context,
                   MaterialPageRoute(builder: (_) => const InventoryScreen(initialCategoryFilter: 'Low Stock')),
                 );
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.receipt_long_outlined, color: AppTheme.cost, size: 18),
+              title: const Text('Operating Expenses'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpensesScreen()));
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.lock_reset, color: AppTheme.primary, size: 18),
+              title: const Text('Change Password'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen()));
               },
             ),
           ],

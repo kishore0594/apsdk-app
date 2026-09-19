@@ -47,6 +47,7 @@ class DBHelper {
   CollectionReference get _supplierTxns => _fs.collection('supplier_transactions');
   CollectionReference get _supplierPurchaseItems => _fs.collection('supplier_purchase_items');
   CollectionReference get _stockMovements => _fs.collection('stock_movements');
+  CollectionReference get _expenses => _fs.collection('expenses');
 
   Map<String, dynamic> _withId(DocumentSnapshot doc) {
     final data = (doc.data() as Map<String, dynamic>?) ?? {};
@@ -655,13 +656,30 @@ class DBHelper {
     // exactly, rather than a rolling 168-hour window from the current
     // minute, so the two screens' "this week" figures always agree.
     final today = DateTime(now.year, now.month, now.day);
-    final weekAgo = today.subtract(const Duration(days: 6)).toIso8601String();
+    final weekStart = today.subtract(const Duration(days: 6));
+    final weekEndExclusive = today.add(const Duration(days: 1));
     final monthStart = DateTime(now.year, now.month, 1).toIso8601String();
     final trendCutoff = now.subtract(const Duration(days: 14)).toIso8601String();
     final attentionCutoff = now.subtract(const Duration(days: 14)).toIso8601String();
 
+    // Reuses the exact same query Reports & Trends uses for "Credit
+    // Payments Collected" — rather than a second, separate
+    // implementation. The earlier version summed each *currently
+    // existing* vendor's transactions individually, which quietly
+    // dropped payments from any vendor who'd since been deleted (their
+    // transaction history is kept for the audit trail even after
+    // deletion, but they no longer appear in getVendors()). Querying the
+    // transaction collection directly, the same way Reports does, has no
+    // such gap — and since both screens now call the same function, they
+    // can't drift apart again the way they did with two hand-matched
+    // date calculations.
+    final cashFlow = await getCashCollected(
+      startIso: weekStart.toIso8601String(),
+      endIsoExclusive: weekEndExclusive.toIso8601String(),
+    );
+    final collectedThisWeek = (cashFlow['credit_payments_collected'] as num?)?.toDouble() ?? 0;
+
     var newThisMonth = 0;
-    double collectedThisWeek = 0;
     final daysOutstandingList = <int>[];
     final needsAttention = <Map<String, dynamic>>[];
     final trends = <String, double>{};
@@ -677,14 +695,6 @@ class DBHelper {
       // for why the query itself has no orderBy.
       final snap = await _creditTxns.where('vendor_id', isEqualTo: vendorId).get();
       final txns = _fromSnapshot(snap)..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
-
-      for (final t in txns) {
-        final date = t['date'] as String;
-        final amount = (t['amount'] as num).toDouble();
-        if (t['type'] == 'PAYMENT' && date.compareTo(weekAgo) >= 0) {
-          collectedThisWeek += amount;
-        }
-      }
 
       if (balance <= 0) continue;
 
@@ -734,6 +744,90 @@ class DBHelper {
       'needs_attention': needsAttention,
       'trends': trends,
     };
+  }
+
+  // ---------------- OPERATING EXPENSES ----------------
+  // Rent, electricity, wages, transport — real overhead that Gross Profit
+  // (revenue minus cost of goods sold) never accounted for. Reports &
+  // Trends subtracts this from Gross Profit to show an actual Net Profit
+  // figure, closer to real take-home than Gross Profit alone was.
+
+  Future<String> addExpense({
+    required String category,
+    required double amount,
+    String? notes,
+    String? date,
+  }) async {
+    final doc = await _expenses.add({
+      'category': category,
+      'amount': amount,
+      'notes': notes,
+      'date': date ?? DateTime.now().toIso8601String(),
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    return doc.id;
+  }
+
+  Future<void> updateExpense(
+    String id, {
+    required String category,
+    required double amount,
+    String? notes,
+    required String date,
+  }) async {
+    await _expenses.doc(id).update({
+      'category': category,
+      'amount': amount,
+      'notes': notes,
+      'date': date,
+    });
+  }
+
+  Future<void> deleteExpense(String id) async {
+    await _expenses.doc(id).delete();
+  }
+
+  /// Live list of expenses within a date range, newest first — powers the
+  /// Operating Expenses screen.
+  Stream<List<Map<String, dynamic>>> watchExpenses({
+    required String startIso,
+    required String endIsoExclusive,
+  }) {
+    return _expenses
+        .where('date', isGreaterThanOrEqualTo: startIso)
+        .where('date', isLessThan: endIsoExclusive)
+        .snapshots()
+        .map((snap) {
+      final list = _fromSnapshot(snap);
+      list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+      return list;
+    });
+  }
+
+  /// Total expenses for a date range, broken down by category — feeds
+  /// both the Operating Expenses screen's summary and the Net Profit
+  /// figure on Reports & Trends.
+  Future<Map<String, dynamic>> getExpenseSummary({
+    required String startIso,
+    required String endIsoExclusive,
+  }) async {
+    final snap = await _expenses
+        .where('date', isGreaterThanOrEqualTo: startIso)
+        .where('date', isLessThan: endIsoExclusive)
+        .get();
+    double total = 0;
+    final byCategory = <String, double>{};
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final amount = (data['amount'] as num?)?.toDouble() ?? 0;
+      final category = (data['category'] as String?)?.trim();
+      final key = (category == null || category.isEmpty) ? 'Other' : category;
+      total += amount;
+      byCategory[key] = (byCategory[key] ?? 0) + amount;
+    }
+    final breakdown = byCategory.entries.map((e) => {'category': e.key, 'total': e.value}).toList()
+      ..sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
+    return {'total': total, 'by_category': breakdown};
   }
 
   // ---------------- SALES ----------------

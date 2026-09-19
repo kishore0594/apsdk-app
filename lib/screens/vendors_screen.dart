@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_strings.dart';
+import '../utils/app_info.dart';
 
 class VendorsScreen extends StatefulWidget {
   const VendorsScreen({super.key});
@@ -372,6 +374,43 @@ class _VendorsScreenState extends State<VendorsScreen> {
     }
   }
 
+  /// Opens WhatsApp with a pre-filled reminder message for this vendor —
+  /// composed, never sent automatically. You review and hit send yourself,
+  /// same as typing the message by hand, just without retyping it each
+  /// time.
+  Future<void> _sendWhatsAppReminder(Map<String, dynamic> v) async {
+    final phone = (v['phone'] as String? ?? '').trim();
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('No phone number saved for this vendor')));
+      return;
+    }
+    // wa.me expects digits only, with country code — assumes a 10-digit
+    // Indian number if none was included, since that's what's typically
+    // entered here; a number already starting with a country code is
+    // left as-is.
+    var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 10) digits = '91$digits';
+    final balance = (v['balance'] as num?)?.toDouble() ?? 0;
+    final message = Uri.encodeComponent(
+      'Hi ${v['name']}, you have an outstanding balance of ${formatCurrency(balance)} '
+      'with ${AppInfo.appName}. Please pay at your earliest convenience. Thank you!',
+    );
+    final url = Uri.parse('https://wa.me/$digits?text=$message');
+    try {
+      final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not open WhatsApp: $e')));
+      }
+    }
+  }
+
   Widget _vendorCard(Map<String, dynamic> v, {double? trend, int? daysOutstanding}) {
     final balance = (v['balance'] as num?)?.toDouble() ?? 0;
     final owes = balance > 0;
@@ -521,6 +560,16 @@ class _VendorsScreenState extends State<VendorsScreen> {
                           : const Icon(Icons.payments_outlined, size: 16),
                       label: Text(AppStrings.t('payment')),
                       style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    tooltip: 'Remind on WhatsApp',
+                    onPressed: () => _sendWhatsAppReminder(v),
+                    icon: const Icon(Icons.chat_outlined, size: 18),
+                    style: IconButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366).withOpacity(0.12),
+                      foregroundColor: const Color(0xFF128C7E),
                     ),
                   ),
                 ],

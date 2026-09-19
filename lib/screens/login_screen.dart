@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_logo.dart';
+import '../utils/app_info.dart';
+import '../utils/password_policy.dart';
 import '../utils/locale_controller.dart';
 import '../utils/app_strings.dart';
 
@@ -15,6 +17,9 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+  final _confirmPasswordCtrl = TextEditingController();
+  final _accessCodeCtrl = TextEditingController();
+  bool _isSignUp = false;
   bool _loading = false;
   String? _error;
   bool _obscure = true;
@@ -47,6 +52,68 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _signUp() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    // Everything below is checked before touching Firebase, so a mistake
+    // here never costs a network round-trip.
+    if (_accessCodeCtrl.text.trim() != AppInfo.signupAccessCode) {
+      setState(() {
+        _loading = false;
+        _error = 'That access code isn\'t right — ask whoever manages the store for it.';
+      });
+      return;
+    }
+    final passwordError = PasswordPolicy.check(_passwordCtrl.text);
+    if (passwordError != null) {
+      setState(() {
+        _loading = false;
+        _error = passwordError;
+      });
+      return;
+    }
+    if (_passwordCtrl.text != _confirmPasswordCtrl.text) {
+      setState(() {
+        _loading = false;
+        _error = 'Passwords don\'t match.';
+      });
+      return;
+    }
+    try {
+      await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: _emailCtrl.text.trim(),
+        password: _passwordCtrl.text,
+      );
+      // On success, same as sign-in — main.dart's auth listener takes it
+      // from here.
+    } on FirebaseAuthException catch (e) {
+      setState(() {
+        _error = switch (e.code) {
+          'email-already-in-use' => 'An account already exists with that email — try signing in instead.',
+          'invalid-email' => 'That doesn\'t look like a valid email address.',
+          'weak-password' => 'That password is too easy to guess — try a stronger one.',
+          'network-request-failed' => 'No internet connection.',
+          _ => 'Could not create account: ${e.message ?? e.code}',
+        };
+      });
+    } catch (e) {
+      setState(() => _error = 'Something went wrong: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _toggleMode() {
+    setState(() {
+      _isSignUp = !_isSignUp;
+      _error = null;
+      _confirmPasswordCtrl.clear();
+      _accessCodeCtrl.clear();
+    });
   }
 
   @override
@@ -119,7 +186,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(AppStrings.t('sign_in'),
+                          Text(_isSignUp ? 'Create Account' : AppStrings.t('sign_in'),
                               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 18),
                           TextField(
@@ -134,9 +201,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           TextField(
                             controller: _passwordCtrl,
                             obscureText: _obscure,
-                            onSubmitted: (_) => _signIn(),
+                            onSubmitted: (_) => _isSignUp ? _signUp() : _signIn(),
                             decoration: InputDecoration(
                               labelText: AppStrings.t('password'),
+                              helperText: _isSignUp ? 'At least 12 characters — a longer phrase beats a short complex one' : null,
+                              helperMaxLines: 2,
                               prefixIcon: const Icon(Icons.lock_outline),
                               suffixIcon: IconButton(
                                 icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility,
@@ -145,6 +214,28 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             ),
                           ),
+                          if (_isSignUp) ...[
+                            const SizedBox(height: 14),
+                            TextField(
+                              controller: _confirmPasswordCtrl,
+                              obscureText: _obscure,
+                              decoration: const InputDecoration(
+                                labelText: 'Confirm password',
+                                prefixIcon: Icon(Icons.lock_outline),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            TextField(
+                              controller: _accessCodeCtrl,
+                              onSubmitted: (_) => _signUp(),
+                              decoration: const InputDecoration(
+                                labelText: 'Access code',
+                                helperText: 'Ask whoever manages the store for this',
+                                helperMaxLines: 2,
+                                prefixIcon: Icon(Icons.vpn_key_outlined),
+                              ),
+                            ),
+                          ],
                           if (_error != null) ...[
                             const SizedBox(height: 14),
                             Container(
@@ -168,15 +259,27 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
                           const SizedBox(height: 22),
                           FilledButton.icon(
-                            onPressed: _loading ? null : _signIn,
+                            onPressed: _loading ? null : (_isSignUp ? _signUp : _signIn),
                             icon: _loading
                                 ? const SizedBox(
                                     height: 16,
                                     width: 16,
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2, color: Colors.white))
-                                : const Icon(Icons.login, size: 18),
-                            label: Text(_loading ? AppStrings.t('signing_in') : AppStrings.t('sign_in')),
+                                : Icon(_isSignUp ? Icons.person_add_alt : Icons.login, size: 18),
+                            label: Text(_loading
+                                ? (_isSignUp ? 'Creating account…' : AppStrings.t('signing_in'))
+                                : (_isSignUp ? 'Create Account' : AppStrings.t('sign_in'))),
+                          ),
+                          const SizedBox(height: 10),
+                          TextButton(
+                            onPressed: _loading ? null : _toggleMode,
+                            child: Text(
+                              _isSignUp
+                                  ? 'Already have an account? Sign In'
+                                  : 'Don\'t have an account? Sign Up',
+                              style: const TextStyle(fontSize: 13),
+                            ),
                           ),
                         ],
                       ),

@@ -33,6 +33,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Map<String, dynamic>> _creditTrend = [];
   double _cashCollected = 0;
   double _creditPaymentsCollected = 0;
+  double _expenseTotal = 0;
 
   @override
   void initState() {
@@ -67,7 +68,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       lastDate: DateTime.now(),
       initialDateRange: DateTimeRange(start: _customStart, end: _customEnd),
     );
-    if (range != null) {
+    if (range != null && mounted) {
       setState(() {
         _customStart = range.start;
         _customEnd = range.end;
@@ -93,29 +94,36 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _db.getSubcategoryWiseSales(startIso: start, endIsoExclusive: end),
         _db.getCreditTrend(startIso: start, endIsoExclusive: end),
         _db.getCashCollected(startIso: start, endIsoExclusive: end),
+        _db.getExpenseSummary(startIso: start, endIsoExclusive: end),
       ]);
       final summary = results[0] as Map<String, dynamic>;
-      setState(() {
-        _revenue = (summary['revenue'] as num?)?.toDouble() ?? 0;
-        _cost = (summary['cost'] as num?)?.toDouble() ?? 0;
-        _profit = (summary['profit'] as num?)?.toDouble() ?? 0;
-        _salesCount = (summary['count'] as int?) ?? 0;
-        _trend = (results[1] as List<Map<String, dynamic>>).reversed.toList();
-        _paymentMix = results[2] as List<Map<String, dynamic>>;
-        _topProducts = (results[3] as List<Map<String, dynamic>>).take(5).toList();
-        _byCategory = results[4] as List<Map<String, dynamic>>;
-        _bySubcategory = results[5] as List<Map<String, dynamic>>;
-        _creditTrend = results[6] as List<Map<String, dynamic>>;
-        final cashFlow = results[7] as Map<String, dynamic>;
-        _cashCollected = (cashFlow['cash_collected'] as num?)?.toDouble() ?? 0;
-        _creditPaymentsCollected = (cashFlow['credit_payments_collected'] as num?)?.toDouble() ?? 0;
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _revenue = (summary['revenue'] as num?)?.toDouble() ?? 0;
+          _cost = (summary['cost'] as num?)?.toDouble() ?? 0;
+          _profit = (summary['profit'] as num?)?.toDouble() ?? 0;
+          _salesCount = (summary['count'] as int?) ?? 0;
+          _trend = (results[1] as List<Map<String, dynamic>>).reversed.toList();
+          _paymentMix = results[2] as List<Map<String, dynamic>>;
+          _topProducts = (results[3] as List<Map<String, dynamic>>).take(5).toList();
+          _byCategory = results[4] as List<Map<String, dynamic>>;
+          _bySubcategory = results[5] as List<Map<String, dynamic>>;
+          _creditTrend = results[6] as List<Map<String, dynamic>>;
+          final cashFlow = results[7] as Map<String, dynamic>;
+          _cashCollected = (cashFlow['cash_collected'] as num?)?.toDouble() ?? 0;
+          _creditPaymentsCollected = (cashFlow['credit_payments_collected'] as num?)?.toDouble() ?? 0;
+          final expenseSummary = results[8] as Map<String, dynamic>;
+          _expenseTotal = (expenseSummary['total'] as num?)?.toDouble() ?? 0;
+          _loading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _loading = false;
-        _error = 'Could not load reports: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = 'Could not load reports: $e';
+        });
+      }
     }
   }
 
@@ -214,7 +222,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               value: '$_salesCount',
                               icon: Icons.receipt_long_outlined,
                               color: const Color(0xFF7C3AED)),
+                          _MetricCard(
+                              label: 'Operating Expenses',
+                              value: formatCurrency(_expenseTotal),
+                              icon: Icons.receipt_long_outlined,
+                              color: const Color(0xFFEA580C)),
+                          _MetricCard(
+                              label: 'Net Profit',
+                              value: formatCurrency(_profit - _expenseTotal),
+                              icon: Icons.account_balance_wallet_outlined,
+                              color: (_profit - _expenseTotal) >= 0
+                                  ? const Color(0xFF1E6F5C)
+                                  : const Color(0xFFDC2626)),
                         ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Net Profit = Gross Profit − Operating Expenses for this period. Add expenses '
+                        'from the Dashboard\'s side panel to keep this accurate.',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.3),
                       ),
                       const SizedBox(height: 20),
                       Container(
