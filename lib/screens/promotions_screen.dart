@@ -1,8 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:gal/gal.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
 import '../utils/app_theme.dart';
@@ -17,7 +15,8 @@ class PromotionsScreen extends StatefulWidget {
 
 class _PromotionsScreenState extends State<PromotionsScreen> {
   final _db = DBHelper.instance;
-  final _messageCtrl = TextEditingController();
+  final _messageEnCtrl = TextEditingController();
+  final _messageTaCtrl = TextEditingController();
   Map<String, dynamic>? _selectedProduct;
   List<Map<String, dynamic>> _selectedVendors = [];
   int _stepIndex = -1; // -1 = still composing; >=0 = stepping through recipients
@@ -53,8 +52,9 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
               const Text('Why two buttons?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               const Text(
-                'WhatsApp has no single method that both picks who a message goes to AND attaches a '
-                'photo at the same time — only one or the other.',
+                'WhatsApp has no single method that attaches a photo directly into a specific chat — '
+                'attaching still needs one manual step, but both buttons open the right vendor\'s chat '
+                'for you first.',
                 style: TextStyle(fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 16),
@@ -69,8 +69,9 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
               const Text('Share with Photo', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
               const SizedBox(height: 4),
               const Text(
-                'Opens your phone\'s normal share sheet with the product photo and message attached — pick '
-                'WhatsApp there, then pick the vendor yourself, the same as sharing any photo normally.',
+                'Saves the product photo to your gallery, then opens WhatsApp on that vendor\'s chat — same '
+                'as Send Text. Tap the attach button in the chat and the photo will be right there as the '
+                'newest one.',
                 style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.4),
               ),
               const SizedBox(height: 14),
@@ -102,10 +103,15 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
   }
 
   String _composedMessage(String language) {
-    final text = _messageCtrl.text.trim();
+    final en = _messageEnCtrl.text.trim();
+    final ta = _messageTaCtrl.text.trim();
     if (language == 'ta') {
+      // Falls back to the English box if the Tamil one was left empty —
+      // sends something sensible rather than a blank message.
+      final text = ta.isNotEmpty ? ta : en;
       return 'வணக்கம்,\n\n$text\n\n- ${AppInfo.appName}';
     }
+    final text = en.isNotEmpty ? en : ta;
     return 'Hello,\n\n$text\n\n- ${AppInfo.appName}';
   }
 
@@ -164,17 +170,54 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
     if (language == null) return;
     final photo = _selectedProduct?['photo'] as String?;
     if (photo == null) return;
+    final phone = (vendor['phone'] as String? ?? '').trim();
+    if (phone.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('No phone number saved for this vendor')));
+      }
+      return;
+    }
     try {
+      // Saved to the gallery rather than shared via the OS share sheet —
+      // wa.me (below) already redirects straight to this vendor's chat,
+      // matching the text flow. Saving to the gallery means the photo
+      // shows up as the newest item when you tap the attach button
+      // inside that now-open, already-correct chat — one tap instead of
+      // hunting for the right contact in a blind share sheet.
       final bytes = base64Decode(photo);
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/promo_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await file.writeAsBytes(bytes);
-      await Share.shareXFiles([XFile(file.path)], text: _composedMessage(language));
-      if (mounted) setState(() => _sentTo.add(vendor['id'] as String));
+      await Gal.putImageBytes(bytes);
+    } on GalException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not save photo: ${e.type.message}')));
+      }
+      return;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not share photo: $e')));
+            .showSnackBar(SnackBar(content: Text('Could not save photo: $e')));
+      }
+      return;
+    }
+
+    var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length == 10) digits = '91$digits';
+    final message = Uri.encodeComponent(_composedMessage(language));
+    final url = Uri.parse('https://wa.me/$digits?text=$message');
+    try {
+      final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
+      if (launched && mounted) {
+        setState(() => _sentTo.add(vendor['id'] as String));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Photo saved — tap the attach button in the chat to add it'),
+          duration: Duration(seconds: 4),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not open WhatsApp: $e')));
       }
     }
   }
@@ -203,14 +246,35 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         const Text('Message', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
+        const Text(
+          'Write it in whichever language(s) you\'ll actually send — leaving one blank falls back '
+          'to the other when you pick a language to send in.',
+          style: TextStyle(fontSize: 12, color: Colors.black54),
+        ),
+        const SizedBox(height: 10),
+        const Text('English', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+        const SizedBox(height: 4),
         TextField(
-          controller: _messageCtrl,
-          maxLines: 5,
+          controller: _messageEnCtrl,
+          maxLines: 4,
           decoration: const InputDecoration(
             hintText: 'e.g. New stock of premium cattle feed just arrived — 5% off this week!',
             border: OutlineInputBorder(),
           ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 14),
+        const Text('தமிழ்', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+        const SizedBox(height: 4),
+        TextField(
+          controller: _messageTaCtrl,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            hintText: 'e.g. புதிய கால்நடை தீவனம் வந்துள்ளது — இந்த வாரம் 5% தள்ளுபடி!',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 20),
         const Text('Product (optional)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -272,7 +336,8 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
         ),
         const SizedBox(height: 28),
         FilledButton.icon(
-          onPressed: (_messageCtrl.text.trim().isNotEmpty && _selectedVendors.isNotEmpty)
+          onPressed: ((_messageEnCtrl.text.trim().isNotEmpty || _messageTaCtrl.text.trim().isNotEmpty) &&
+                  _selectedVendors.isNotEmpty)
               ? () => setState(() {
                     _stepIndex = 0;
                     _sentTo.clear();

@@ -60,7 +60,25 @@ class AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
+      // FirebaseAuth.instance.currentUser is the locally-cached signed-in
+      // user, available synchronously with no network involved — used
+      // here as the stream's initial value so a real, already-signed-in
+      // session is trusted immediately if one exists, rather than
+      // waiting on the stream's first event to decide anything.
+      //
+      // This matters specifically when the app is opened with no
+      // internet: some Firebase Auth SDK versions, as part of resolving
+      // that first stream event, try to re-verify the cached session
+      // against the server — and clear it if that check fails, rather
+      // than falling back to the cache. Deciding from currentUser
+      // directly sidesteps that path entirely: a real cached session
+      // means RootNav shows immediately, offline or not, and nothing
+      // here has any opportunity to fail a network call and undo it.
+      initialData: FirebaseAuth.instance.currentUser,
       builder: (context, snapshot) {
+        if (snapshot.data != null) {
+          return const RootNav();
+        }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(
@@ -78,9 +96,6 @@ class AuthGate extends StatelessWidget {
               ),
             ),
           );
-        }
-        if (snapshot.hasData) {
-          return const RootNav();
         }
         return const LoginScreen();
       },
