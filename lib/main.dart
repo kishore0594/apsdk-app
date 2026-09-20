@@ -194,14 +194,31 @@ class RootNav extends StatefulWidget {
 
 class _RootNavState extends State<RootNav> {
   int _index = 0;
+  bool _roleLoaded = false;
 
   @override
   void initState() {
     super.initState();
     // Fetched once per sign-in (RootNav only exists while signed in —
     // see AuthGate) rather than re-fetched by every screen that needs
-    // to know the role.
-    UserRole.instance.load();
+    // to know the role. Awaited properly this time and gated behind
+    // _roleLoaded below — every screen that checks UserRole.instance
+    // reads it directly in its own build() method rather than listening
+    // for changes, so the previous fire-and-forget call let the real
+    // screens render immediately with whatever UserRole happened to
+    // hold at that instant. For an admin account, that could still be
+    // "viewer" left over from a previous sign-out's safe default,
+    // visible until something else happened to trigger a rebuild —
+    // exactly the flash of the View Only page a master account saw
+    // before a manual refresh corrected it. Waiting here means every
+    // screen sees the right role from the moment it's first built, not
+    // just eventually.
+    _loadRole();
+  }
+
+  Future<void> _loadRole() async {
+    await UserRole.instance.load();
+    if (mounted) setState(() => _roleLoaded = true);
   }
 
   final _screens = const [
@@ -214,6 +231,9 @@ class _RootNavState extends State<RootNav> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_roleLoaded) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return Scaffold(
       body: IndexedStack(index: _index, children: _screens),
       bottomNavigationBar: NavigationBar(
