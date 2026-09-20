@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:gal/gal.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
 import '../utils/app_theme.dart';
@@ -52,9 +54,8 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
               const Text('Why two buttons?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               const Text(
-                'WhatsApp has no single method that attaches a photo directly into a specific chat — '
-                'attaching still needs one manual step, but both buttons open the right vendor\'s chat '
-                'for you first.',
+                'WhatsApp has no single method that both picks who a message goes to AND attaches a '
+                'photo at the same time — only one or the other.',
                 style: TextStyle(fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 16),
@@ -69,9 +70,8 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
               const Text('Share with Photo', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
               const SizedBox(height: 4),
               const Text(
-                'Saves the product photo to your gallery, then opens WhatsApp on that vendor\'s chat — same '
-                'as Send Text. Tap the attach button in the chat and the photo will be right there as the '
-                'newest one.',
+                'Opens your phone\'s normal share sheet with the product photo and message attached — pick '
+                'WhatsApp there, then pick the vendor yourself, the same as sharing any photo normally.',
                 style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.4),
               ),
               const SizedBox(height: 14),
@@ -170,68 +170,27 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
     if (language == null) return;
     final photo = _selectedProduct?['photo'] as String?;
     if (photo == null) return;
-    final phone = (vendor['phone'] as String? ?? '').trim();
-    if (phone.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('No phone number saved for this vendor')));
-      }
-      return;
-    }
     try {
-      // Saved to the gallery rather than shared via the OS share sheet —
-      // wa.me (below) already redirects straight to this vendor's chat,
-      // matching the text flow. Saving to the gallery means the photo
-      // shows up as the newest item when you tap the attach button
-      // inside that now-open, already-correct chat — one tap instead of
-      // hunting for the right contact in a blind share sheet.
+      // Attaches the image directly through the OS share sheet — the
+      // same mechanism used whenever you share a photo from any normal
+      // app, and the one genuinely reliable way to guarantee the image
+      // is actually attached. An earlier version tried saving to the
+      // gallery and redirecting straight to the vendor's chat instead,
+      // which would have been more convenient, but proved unreliable —
+      // the image sometimes never showed up as attachable even after a
+      // delay for gallery indexing. Reliability wins here: you'll need
+      // to pick WhatsApp and the contact yourself in the share sheet
+      // that opens, but the photo will always actually be there.
       final bytes = base64Decode(photo);
-      await Gal.putImageBytes(bytes);
-      // Android can take a moment to index a just-saved image into the
-      // gallery/MediaStore before other apps (WhatsApp's attach picker
-      // included) can see it — without this pause, opening WhatsApp
-      // immediately after saving can land on a picker that doesn't yet
-      // show the new photo as the newest item.
-      await Future.delayed(const Duration(milliseconds: 900));
-    } on GalException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not save photo: ${e.type.message}')));
-      }
-      return;
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/promo_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path)], text: _composedMessage(language));
+      if (mounted) setState(() => _sentTo.add(vendor['id'] as String));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not save photo: $e')));
-      }
-      return;
-    }
-
-    // Shown now, before handing off to WhatsApp — a SnackBar fired after
-    // launchUrl below would appear once the user is already in WhatsApp
-    // and wouldn't be seen until they came back to this screen, which
-    // defeats the point of a reminder to tap attach.
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Photo saved to gallery — tap the attach button in the chat to add it'),
-        duration: Duration(seconds: 3),
-      ));
-      await Future.delayed(const Duration(milliseconds: 600));
-    }
-
-    var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length == 10) digits = '91$digits';
-    final message = Uri.encodeComponent(_composedMessage(language));
-    final url = Uri.parse('https://wa.me/$digits?text=$message');
-    try {
-      final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
-      if (launched && mounted) {
-        setState(() => _sentTo.add(vendor['id'] as String));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not open WhatsApp: $e')));
+            .showSnackBar(SnackBar(content: Text('Could not share photo: $e')));
       }
     }
   }

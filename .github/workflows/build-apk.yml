@@ -126,14 +126,6 @@ jobs:
             exit 1
           fi
 
-      # Required by the gal package (Promotions' "Share with Photo") to
-      # save an image to the gallery on Android 9 and below — scoped with
-      # maxSdkVersion so it's simply ignored on newer Android, which uses
-      # scoped storage instead and needs no such permission.
-      - name: Add gallery-write permission for the Promotions feature
-        run: |
-          sed -i '/<manifest /a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />' android/app/src/main/AndroidManifest.xml
-
       # The Firebase config file identifies which cloud project the app
       # talks to. It's not committed to the repo (so it isn't publicly
       # visible) — instead it's stored as a repo secret and written out

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,33 +18,98 @@ import 'screens/login_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  // Offline persistence is on by default on Android/iOS, but this makes it
-  // explicit rather than relying on an unstated default — and removes any
-  // cache-size limit, so a store's data (small by any reasonable measure)
-  // is never evicted from the on-device cache to make room, no matter how
-  // long the phone stays offline.
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
-  );
-  await LocaleController.instance.load();
-
-  // Routes real crashes to Firebase Crashlytics instead of only ever
-  // being diagnosed from a screenshot and a description — this is the
-  // single biggest gap in how bugs have been found and fixed in this
-  // app so far. Two separate hooks are needed for full coverage:
-  // FlutterError.onError catches errors from within Flutter's own
-  // framework (widget build/layout/paint errors); PlatformDispatcher's
-  // onError catches everything else — async code running outside that
-  // framework's error zone, which FlutterError.onError alone would miss.
-  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
-  PlatformDispatcher.instance.onError = (error, stack) {
+  runZonedGuarded(() async {
+    await _initializeAndRun();
+  }, (error, stack) {
+    // Catches anything that escapes even the startup try/catch below —
+    // the last line of defense so a startup failure is at least
+    // reported to Crashlytics (once it's initialized) rather than
+    // silently crashing with nothing recorded anywhere.
     FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-    return true;
-  };
+  });
+}
 
-  runApp(const ApsdkApp());
+Future<void> _initializeAndRun() async {
+  try {
+    await Firebase.initializeApp();
+    // Offline persistence is on by default on Android/iOS, but this makes it
+    // explicit rather than relying on an unstated default — and removes any
+    // cache-size limit, so a store's data (small by any reasonable measure)
+    // is never evicted from the on-device cache to make room, no matter how
+    // long the phone stays offline.
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+    );
+    await LocaleController.instance.load();
+
+    // Routes real crashes to Firebase Crashlytics instead of only ever
+    // being diagnosed from a screenshot and a description — this is the
+    // single biggest gap in how bugs have been found and fixed in this
+    // app so far. Two separate hooks are needed for full coverage:
+    // FlutterError.onError catches errors from within Flutter's own
+    // framework (widget build/layout/paint errors); PlatformDispatcher's
+    // onError catches everything else — async code running outside that
+    // framework's error zone, which FlutterError.onError alone would miss.
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
+
+    runApp(const ApsdkApp());
+  } catch (e, stack) {
+    // If anything above fails — for any reason, on any connection —
+    // this shows a real, recoverable screen with the actual error text
+    // and a way to try again, instead of the app crashing with nothing
+    // visible, or a blank screen with no explanation and no way forward.
+    // Whatever "offline login" has actually been showing, this at least
+    // makes it possible to see the real message behind it, rather than
+    // guessing from a description alone.
+    try {
+      await FirebaseCrashlytics.instance.recordError(e, stack, fatal: true);
+    } catch (_) {
+      // Crashlytics itself may not be available if Firebase never
+      // finished initializing — nothing more to do here.
+    }
+    runApp(_StartupErrorApp(error: e.toString()));
+  }
+}
+
+class _StartupErrorApp extends StatelessWidget {
+  final String error;
+  const _StartupErrorApp({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                  const SizedBox(height: 16),
+                  const Text('Could not start the app',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  Text(error, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5)),
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: () => main(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class ApsdkApp extends StatelessWidget {
