@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import '../db/db_helper.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_info.dart';
@@ -18,7 +17,6 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
   final _db = DBHelper.instance;
   final _messageEnCtrl = TextEditingController();
   final _messageTaCtrl = TextEditingController();
-  bool _translating = false;
   Map<String, dynamic>? _selectedProduct;
   List<Map<String, dynamic>> _selectedVendors = [];
   int _stepIndex = -1; // -1 = still composing; >=0 = stepping through recipients
@@ -51,19 +49,6 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
                   decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
                 ),
               ),
-              const Text('Translate', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 16),
-              const Text(
-                'Write in either box, then tap a translate button to fill the other one automatically — '
-                'done on your phone, not sent anywhere. The first time you use it, it needs internet for a '
-                'one-time download; after that it works offline too. The translated text is a starting '
-                'point, not final — it\'s still yours to edit before sending, same as anything you typed '
-                'yourself.',
-                style: TextStyle(fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 20),
-              const Divider(height: 1),
-              const SizedBox(height: 20),
               const Text('Why two buttons?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               const Text(
@@ -269,69 +254,6 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
     );
   }
 
-  /// Translates whichever box is the source into the other — English to
-  /// தமிழ் or the reverse. On-device (Google ML Kit), so it works fully
-  /// offline after the one-time model download the first time it's
-  /// used. The translated text lands in the target box as a starting
-  /// point, not locked — still editable before sending, since machine
-  /// translation is a draft worth a quick read, not something to trust
-  /// blindly for a message a customer will actually read.
-  Future<void> _translate({required bool toTamil}) async {
-    final sourceCtrl = toTamil ? _messageEnCtrl : _messageTaCtrl;
-    final targetCtrl = toTamil ? _messageTaCtrl : _messageEnCtrl;
-    final sourceText = sourceCtrl.text.trim();
-    if (sourceText.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Write something in ${toTamil ? "English" : "தமிழ்"} first'),
-      ));
-      return;
-    }
-
-    setState(() => _translating = true);
-    final modelManager = OnDeviceTranslatorModelManager();
-    final english = TranslateLanguage.english;
-    final tamil = TranslateLanguage.tamil;
-    OnDeviceTranslator? translator;
-    try {
-      // Both language models are needed regardless of direction — check
-      // and download whichever of the two isn't already on the device.
-      // Only the first-ever translation should hit this; after that,
-      // both models stay downloaded and every future translation is
-      // instant.
-      for (final lang in [english, tamil]) {
-        final downloaded = await modelManager.isModelDownloaded(lang.bcpCode);
-        if (!downloaded) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('Downloading ${lang == english ? "English" : "Tamil"} translation model — one-time, needs internet…'),
-              duration: const Duration(seconds: 3),
-            ));
-          }
-          final ok = await modelManager.downloadModel(lang.bcpCode);
-          if (!ok) {
-            throw Exception('Could not download the translation model — check your internet connection.');
-          }
-        }
-      }
-
-      translator = OnDeviceTranslator(
-        sourceLanguage: toTamil ? english : tamil,
-        targetLanguage: toTamil ? tamil : english,
-      );
-      final translated = await translator.translateText(sourceText);
-      if (mounted) {
-        setState(() => targetCtrl.text = translated);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Translation failed: $e')));
-      }
-    } finally {
-      await translator?.close();
-      if (mounted) setState(() => _translating = false);
-    }
-  }
-
   Widget _buildComposer() {
     final photo = _selectedProduct?['photo'] as String?;
     return ListView(
@@ -340,8 +262,8 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
         const Text('Message', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         const SizedBox(height: 4),
         const Text(
-          'Write it in either language, then translate to fill the other — or write both yourself. '
-          'Leaving one blank falls back to the other when you pick a language to send in.',
+          'Write it in whichever language(s) you\'ll actually send — leaving one blank falls back '
+          'to the other when you pick a language to send in.',
           style: TextStyle(fontSize: 12, color: Colors.black54),
         ),
         const SizedBox(height: 10),
@@ -356,36 +278,6 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
           ),
           onChanged: (_) => setState(() {}),
         ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _translating ? null : () => _translate(toTamil: true),
-                icon: const Icon(Icons.g_translate, size: 16),
-                label: const Text('English → தமிழ்', style: TextStyle(fontSize: 12.5)),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _translating ? null : () => _translate(toTamil: false),
-                icon: const Icon(Icons.g_translate, size: 16),
-                label: const Text('தமிழ் → English', style: TextStyle(fontSize: 12.5)),
-              ),
-            ),
-          ],
-        ),
-        if (_translating) ...[
-          const SizedBox(height: 8),
-          const Row(
-            children: [
-              SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-              SizedBox(width: 8),
-              Text('Translating…', style: TextStyle(fontSize: 12, color: Colors.black54)),
-            ],
-          ),
-        ],
         const SizedBox(height: 14),
         const Text('தமிழ்', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
         const SizedBox(height: 4),

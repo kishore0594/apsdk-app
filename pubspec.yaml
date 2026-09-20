@@ -1,7 +1,7 @@
 name: madhura_agro_traders
 description: "Madhura Agro Traders - Store sales, credit, inventory and supplier management"
 publish_to: 'none'
-version: 1.0.0+24
+version: 1.0.0+25
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -22,7 +22,6 @@ dependencies:
   url_launcher: ^6.3.1
   image_picker: ^1.1.2
   gal: ^2.3.2
-  google_mlkit_translation: ^0.13.1
 
 dev_dependencies:
   flutter_test:
