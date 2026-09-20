@@ -67,7 +67,19 @@ jobs:
       # cleanly over the existing app.
       - name: Restore the permanent release signing key
         run: |
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "::error::KEYSTORE_BASE64 secret is empty or not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
           echo '${{ secrets.KEYSTORE_BASE64 }}' | base64 -d > android/app/madhura-release-key.jks
+          # Confirms the decode actually produced a real keystore, rather
+          # than letting a bad secret value silently produce a corrupt
+          # file that only fails later, further from the real cause.
+          if ! keytool -list -keystore android/app/madhura-release-key.jks -storepass "${{ secrets.KEYSTORE_PASSWORD }}" > /dev/null 2>&1; then
+            echo "::error::KEYSTORE_BASE64 decoded, but the result isn't a valid keystore (or KEYSTORE_PASSWORD is wrong). Re-check both secrets were pasted completely and correctly."
+            exit 1
+          fi
+          echo "Signing key restored and verified successfully."
 
       - name: Configure release signing
         run: |
