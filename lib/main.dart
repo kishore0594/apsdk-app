@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'utils/app_theme.dart';
 import 'utils/app_logo.dart';
 import 'utils/locale_controller.dart';
@@ -27,6 +28,21 @@ Future<void> main() async {
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
   await LocaleController.instance.load();
+
+  // Routes real crashes to Firebase Crashlytics instead of only ever
+  // being diagnosed from a screenshot and a description — this is the
+  // single biggest gap in how bugs have been found and fixed in this
+  // app so far. Two separate hooks are needed for full coverage:
+  // FlutterError.onError catches errors from within Flutter's own
+  // framework (widget build/layout/paint errors); PlatformDispatcher's
+  // onError catches everything else — async code running outside that
+  // framework's error zone, which FlutterError.onError alone would miss.
+  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+  PlatformDispatcher.instance.onError = (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    return true;
+  };
+
   runApp(const ApsdkApp());
 }
 

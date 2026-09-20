@@ -160,6 +160,24 @@ jobs:
             exit 1
           fi
 
+      # Wires the Crashlytics Gradle plugin the same way as Google
+      # Services above, for crash reporting (firebase_crashlytics).
+      # Deliberately the 2.x plugin line, not the newer v3.0.0 — v3 is a
+      # breaking major version with its own stricter minimum AGP/Google-
+      # Services requirements, and given this project's build already
+      # regenerates its Android project fresh on every run, the older,
+      # more broadly-compatible line is the safer choice without a real
+      # device to test the newer one against first.
+      - name: Apply Crashlytics Gradle plugin
+        run: |
+          if [ -f "android/settings.gradle.kts" ]; then
+            sed -i '/^plugins {/a\    id("com.google.firebase.crashlytics") version "2.9.9" apply false' android/settings.gradle.kts
+            sed -i '/dev.flutter.flutter-gradle-plugin/a\    id("com.google.firebase.crashlytics")' android/app/build.gradle.kts
+          elif [ -f "android/build.gradle" ]; then
+            sed -i "/dependencies {/a\\        classpath 'com.google.firebase:firebase-crashlytics-gradle:2.9.9'" android/build.gradle
+            echo "apply plugin: 'com.google.firebase.crashlytics'" >> android/app/build.gradle
+          fi
+
       - name: Install dependencies
         run: flutter pub get
 
