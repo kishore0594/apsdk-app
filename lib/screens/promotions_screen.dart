@@ -187,6 +187,12 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
       // hunting for the right contact in a blind share sheet.
       final bytes = base64Decode(photo);
       await Gal.putImageBytes(bytes);
+      // Android can take a moment to index a just-saved image into the
+      // gallery/MediaStore before other apps (WhatsApp's attach picker
+      // included) can see it — without this pause, opening WhatsApp
+      // immediately after saving can land on a picker that doesn't yet
+      // show the new photo as the newest item.
+      await Future.delayed(const Duration(milliseconds: 900));
     } on GalException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -201,6 +207,18 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
       return;
     }
 
+    // Shown now, before handing off to WhatsApp — a SnackBar fired after
+    // launchUrl below would appear once the user is already in WhatsApp
+    // and wouldn't be seen until they came back to this screen, which
+    // defeats the point of a reminder to tap attach.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Photo saved to gallery — tap the attach button in the chat to add it'),
+        duration: Duration(seconds: 3),
+      ));
+      await Future.delayed(const Duration(milliseconds: 600));
+    }
+
     var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
     if (digits.length == 10) digits = '91$digits';
     final message = Uri.encodeComponent(_composedMessage(language));
@@ -209,10 +227,6 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
       final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
       if (launched && mounted) {
         setState(() => _sentTo.add(vendor['id'] as String));
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Photo saved — tap the attach button in the chat to add it'),
-          duration: Duration(seconds: 4),
-        ));
       }
     } catch (e) {
       if (mounted) {

@@ -54,6 +54,74 @@ jobs:
         run: |
           sed -i 's/android:label="[^"]*"/android:label="Madhura Agro Traders"/' android/app/src/main/AndroidManifest.xml
 
+      # Every build must be signed with the SAME key, or Android refuses
+      # to install it as an update over the existing app ("App not
+      # installed") and forces an uninstall every single time. Since
+      # android/ is regenerated fresh on every run (a brand new,
+      # ephemeral VM each time — see the step above), there is no
+      # keystore that naturally persists between builds on its own;
+      # without this step, Flutter falls back to a debug key that's
+      # randomly different on every run. This decodes one fixed,
+      # permanent keystore (stored as a repo secret, generated once) and
+      # uses it for every build from now on, so updates finally install
+      # cleanly over the existing app.
+      - name: Restore the permanent release signing key
+        run: |
+          echo '${{ secrets.KEYSTORE_BASE64 }}' | base64 -d > android/app/madhura-release-key.jks
+
+      - name: Configure release signing
+        run: |
+          if [ -f "android/app/build.gradle.kts" ]; then
+            cat >> android/app/build.gradle.kts << 'SIGNEOF'
+
+          android {
+              signingConfigs {
+                  create("release") {
+                      storeFile = file("madhura-release-key.jks")
+                      storePassword = "${{ secrets.KEYSTORE_PASSWORD }}"
+                      keyAlias = "madhura"
+                      keyPassword = "${{ secrets.KEYSTORE_PASSWORD }}"
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+              }
+          }
+          SIGNEOF
+          elif [ -f "android/app/build.gradle" ]; then
+            cat >> android/app/build.gradle << 'SIGNEOF'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("madhura-release-key.jks")
+                      storePassword "${{ secrets.KEYSTORE_PASSWORD }}"
+                      keyAlias "madhura"
+                      keyPassword "${{ secrets.KEYSTORE_PASSWORD }}"
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          SIGNEOF
+          else
+            echo "::error::Couldn't find android/app/build.gradle.kts or android/app/build.gradle for signing config."
+            exit 1
+          fi
+
+      # Required by the gal package (Promotions' "Share with Photo") to
+      # save an image to the gallery on Android 9 and below — scoped with
+      # maxSdkVersion so it's simply ignored on newer Android, which uses
+      # scoped storage instead and needs no such permission.
+      - name: Add gallery-write permission for the Promotions feature
+        run: |
+          sed -i '/<manifest /a\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />' android/app/src/main/AndroidManifest.xml
+
       # The Firebase config file identifies which cloud project the app
       # talks to. It's not committed to the repo (so it isn't publicly
       # visible) — instead it's stored as a repo secret and written out
