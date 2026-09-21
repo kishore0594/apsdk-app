@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../utils/app_theme.dart';
 import '../utils/password_policy.dart';
+import '../utils/session_lock.dart';
 
 class ChangePasswordScreen extends StatefulWidget {
   const ChangePasswordScreen({super.key});
@@ -66,6 +67,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
       final credential = EmailAuthProvider.credential(email: email, password: _currentCtrl.text);
       await user.reauthenticateWithCredential(credential);
       await user.updatePassword(_newCtrl.text);
+      // Keeps offline sign-in in step — the old password must stop
+      // working offline too, not just online.
+      await SessionLock.instance.rememberCredentials(user.email ?? '', _newCtrl.text);
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Password changed successfully')));

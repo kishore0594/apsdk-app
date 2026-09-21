@@ -7,6 +7,7 @@ import '../utils/app_info.dart';
 import '../utils/password_policy.dart';
 import '../utils/locale_controller.dart';
 import '../utils/app_strings.dart';
+import '../utils/session_lock.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -25,19 +26,59 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
   bool _obscure = true;
 
+  @override
+  void initState() {
+    super.initState();
+    final remembered = SessionLock.instance.rememberedEmail;
+    if (remembered != null) _emailCtrl.text = remembered;
+  }
+
   Future<void> _signIn() async {
     setState(() {
       _loading = true;
       _error = null;
     });
+    final email = _emailCtrl.text.trim();
+    final password = _passwordCtrl.text;
+    final lock = SessionLock.instance;
+    final current = FirebaseAuth.instance.currentUser;
+    final sameAccount = current != null && (current.email ?? '').toLowerCase() == email.toLowerCase();
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
-        password: _passwordCtrl.text,
-      );
-      // On success, the auth-state listener in main.dart takes over and
-      // shows the app — nothing else to do here.
+      // OFFLINE PATH: this phone already holds a live session for this
+      // account (the user only locked it via Logout). Verify the
+      // password against the fingerprint stored on the device — no
+      // internet involved at all.
+      if (sameAccount && lock.matches(email, password)) {
+        await lock.unlock();
+        return;
+      }
+      if (sameAccount && lock.knows(email)) {
+        // Right account, but the password doesn't match what's stored.
+        // It may have been changed on another phone — confirm with the
+        // server if we're online; offline this correctly fails below.
+        await current!.reauthenticateWithCredential(
+            EmailAuthProvider.credential(email: email, password: password));
+        await lock.rememberCredentials(email, password);
+        await lock.unlock();
+        return;
+      }
+      // ONLINE PATH: first sign-in on this phone, or switching accounts.
+      // Deliberately no signOut() first — if this fails offline, the
+      // existing session is left untouched rather than lost.
+      await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: password);
+      await lock.rememberCredentials(email, password);
+      await lock.unlock();
     } on FirebaseAuthException catch (e) {
+      if (e.code == 'network-request-failed') {
+        setState(() => _error = sameAccount
+            ? (lock.knows(email)
+                ? 'Incorrect password.'
+                : 'Offline sign-in isn\'t set up on this phone yet — connect to internet and sign in once.')
+            : (current != null
+                ? 'Switching to a different account needs internet. Use ${current.email} to sign in offline.'
+                : 'First sign-in on this phone needs internet. After that, you can sign in offline.'));
+        return;
+      }
       setState(() {
         _error = switch (e.code) {
           'user-not-found' || 'invalid-credential' => 'No account found with that email.',
@@ -95,6 +136,8 @@ class _LoginScreenState extends State<LoginScreen> {
         // someone deliberately via Manage Users, never by accident.
         await DBHelper.instance.createUserRoleDoc(uid, _emailCtrl.text.trim());
       }
+      await SessionLock.instance.rememberCredentials(_emailCtrl.text.trim(), _passwordCtrl.text);
+      await SessionLock.instance.unlock();
       // On success, same as sign-in — main.dart's auth listener takes it
       // from here.
     } on FirebaseAuthException catch (e) {

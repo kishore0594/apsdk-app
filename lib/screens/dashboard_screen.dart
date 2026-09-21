@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import '../db/db_helper.dart';
@@ -9,6 +8,7 @@ import '../utils/app_logo.dart';
 import '../utils/app_theme.dart';
 import '../utils/locale_controller.dart';
 import '../utils/user_role.dart';
+import '../utils/session_lock.dart';
 import '../utils/app_strings.dart';
 import 'sales_screen.dart';
 import 'vendors_screen.dart';
@@ -457,8 +457,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               );
               if (confirm == true) {
-                await FirebaseAuth.instance.signOut();
+                // Locks the app on this device instead of destroying the
+                // Firebase session — so signing back in works offline
+                // (see SessionLock). The session and any unsynced sales
+                // stay safe underneath.
                 UserRole.instance.reset();
+                await SessionLock.instance.lock();
               }
             },
           ),

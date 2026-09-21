@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:whatsapp_share2/whatsapp_share2.dart';
 import '../db/db_helper.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_info.dart';
@@ -15,7 +16,7 @@ class PromotionsScreen extends StatefulWidget {
   State<PromotionsScreen> createState() => _PromotionsScreenState();
 }
 
-class _PromotionsScreenState extends State<PromotionsScreen> {
+class _PromotionsScreenState extends State<PromotionsScreen> with WidgetsBindingObserver {
   final _db = DBHelper.instance;
   final _messageEnCtrl = TextEditingController();
   final _messageTaCtrl = TextEditingController();
@@ -23,6 +24,38 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
   List<Map<String, dynamic>> _selectedVendors = [];
   int _stepIndex = -1; // -1 = still composing; >=0 = stepping through recipients
   final Set<String> _sentTo = {};
+  // Chosen once at Start Sending, not asked again for every vendor.
+  String _language = 'en';
+  // True while WhatsApp is open for the current vendor. When the app
+  // comes back to the foreground, that vendor is marked sent and the
+  // next one is shown automatically — no manual "Next" tap needed.
+  bool _awaitingReturn = false;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _messageEnCtrl.dispose();
+    _messageTaCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _awaitingReturn && _stepIndex >= 0) {
+      setState(() {
+        _awaitingReturn = false;
+        _sentTo.add(_selectedVendors[_stepIndex]['id'] as String);
+        _stepIndex++;
+      });
+    }
+  }
 
   void _showHelpSheet(BuildContext context) {
     showModalBottomSheet(
@@ -51,32 +84,24 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
                   decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
                 ),
               ),
-              const Text('Why two buttons?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const Text('How sending works', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               const Text(
-                'WhatsApp has no single method that both picks who a message goes to AND attaches a '
-                'photo at the same time — only one or the other.',
+                'Pick the language once, then for each vendor tap the green button. WhatsApp opens on that '
+                'vendor\'s chat with the product photo and your message already attached — just press Send, '
+                'then come back here. The next vendor opens automatically.',
                 style: TextStyle(fontSize: 13, height: 1.4),
               ),
-              const SizedBox(height: 16),
-              const Text('Send Text', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-              const SizedBox(height: 4),
-              const Text(
-                'Opens WhatsApp already set to that vendor, with your message pre-filled. No photo — fastest '
-                'option for a plain update.',
-                style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.4),
-              ),
               const SizedBox(height: 14),
-              const Text('Share with Photo', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
-              const SizedBox(height: 4),
               const Text(
-                'Opens your phone\'s normal share sheet with the product photo and message attached — pick '
-                'WhatsApp there, then pick the vendor yourself, the same as sharing any photo normally.',
+                'One WhatsApp limitation: it jumps straight into the chat only for numbers you have messaged '
+                'before. For a vendor you have never chatted with, WhatsApp shows its contact list first — the '
+                'photo is still attached, just pick the vendor there.',
                 style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.4),
               ),
               const SizedBox(height: 14),
               const Text(
-                'Either way, nothing sends automatically — you review and tap send yourself for every message.',
+                'Nothing sends automatically — you review and press Send yourself for every message.',
                 style: TextStyle(fontSize: 12.5, color: Colors.black54, height: 1.4, fontStyle: FontStyle.italic),
               ),
             ],
@@ -139,59 +164,63 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
     );
   }
 
-  Future<void> _sendText(Map<String, dynamic> vendor) async {
-    final language = await _askLanguage();
-    if (language == null) return;
-    final phone = (vendor['phone'] as String? ?? '').trim();
-    if (phone.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('No phone number saved for this vendor')));
-      }
+  String? _phoneDigits(Map<String, dynamic> vendor) {
+    var digits = (vendor['phone'] as String? ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.isEmpty) return null;
+    if (digits.length == 10) digits = '91$digits';
+    return digits;
+  }
+
+  /// Opens THIS vendor's WhatsApp chat directly, with the product photo
+  /// (if any) and the message already attached — you only press Send.
+  ///
+  /// Photo: uses WhatsApp's own direct-to-contact share (whatsapp_share2).
+  /// Known WhatsApp limitation: this jumps straight into the chat only
+  /// for numbers you have chatted with before; for a brand-new number,
+  /// WhatsApp shows its own contact list instead (photo still attached).
+  /// Text only: wa.me link, which opens any number's chat directly.
+  Future<void> _sendToVendor(Map<String, dynamic> vendor) async {
+    final digits = _phoneDigits(vendor);
+    if (digits == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('No phone number saved for this vendor')));
       return;
     }
-    var digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length == 10) digits = '91$digits';
-    final message = Uri.encodeComponent(_composedMessage(language));
-    final url = Uri.parse('https://wa.me/$digits?text=$message');
+    setState(() => _sending = true);
+    final message = _composedMessage(_language);
+    final photo = _selectedProduct?['photo'] as String?;
     try {
-      final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
-      if (launched && mounted) setState(() => _sentTo.add(vendor['id'] as String));
+      if (photo != null) {
+        final dir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
+        final file = File('${dir.path}/promo_${DateTime.now().millisecondsSinceEpoch}.jpg');
+        await file.writeAsBytes(base64Decode(photo));
+        final hasWa = await WhatsappShare.isInstalled(package: Package.whatsapp) ?? false;
+        final hasBiz = !hasWa && (await WhatsappShare.isInstalled(package: Package.businessWhatsapp) ?? false);
+        if (hasWa || hasBiz) {
+          _awaitingReturn = true;
+          await WhatsappShare.shareFile(
+            phone: digits,
+            text: message,
+            filePath: [file.path],
+            package: hasWa ? Package.whatsapp : Package.businessWhatsapp,
+          );
+        } else {
+          // WhatsApp not found — fall back to the normal share sheet.
+          _awaitingReturn = true;
+          await Share.shareXFiles([XFile(file.path)], text: message);
+        }
+      } else {
+        final url = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
+        _awaitingReturn = await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
     } catch (e) {
+      _awaitingReturn = false;
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Could not open WhatsApp: $e')));
       }
-    }
-  }
-
-  Future<void> _shareWithPhoto(Map<String, dynamic> vendor) async {
-    final language = await _askLanguage();
-    if (language == null) return;
-    final photo = _selectedProduct?['photo'] as String?;
-    if (photo == null) return;
-    try {
-      // Attaches the image directly through the OS share sheet — the
-      // same mechanism used whenever you share a photo from any normal
-      // app, and the one genuinely reliable way to guarantee the image
-      // is actually attached. An earlier version tried saving to the
-      // gallery and redirecting straight to the vendor's chat instead,
-      // which would have been more convenient, but proved unreliable —
-      // the image sometimes never showed up as attachable even after a
-      // delay for gallery indexing. Reliability wins here: you'll need
-      // to pick WhatsApp and the contact yourself in the share sheet
-      // that opens, but the photo will always actually be there.
-      final bytes = base64Decode(photo);
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/promo_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await file.writeAsBytes(bytes);
-      await Share.shareXFiles([XFile(file.path)], text: _composedMessage(language));
-      if (mounted) setState(() => _sentTo.add(vendor['id'] as String));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not share photo: $e')));
-      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -311,10 +340,16 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
         FilledButton.icon(
           onPressed: ((_messageEnCtrl.text.trim().isNotEmpty || _messageTaCtrl.text.trim().isNotEmpty) &&
                   _selectedVendors.isNotEmpty)
-              ? () => setState(() {
+              ? () async {
+                  final lang = await _askLanguage();
+                  if (lang == null) return;
+                  setState(() {
+                    _language = lang;
                     _stepIndex = 0;
                     _sentTo.clear();
-                  })
+                    _awaitingReturn = false;
+                  });
+                }
               : null,
           icon: const Icon(Icons.send_outlined, size: 18),
           label: const Text('Start Sending'),
@@ -371,25 +406,31 @@ class _PromotionsScreenState extends State<PromotionsScreen> {
             const Chip(label: Text('Sent', style: TextStyle(fontSize: 11)), backgroundColor: Color(0xFFDCFCE7)),
           ],
           const Spacer(),
-          OutlinedButton.icon(
-            onPressed: () => _sendText(vendor),
-            icon: const Icon(Icons.message_outlined, size: 18),
-            label: const Text('Send Text'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-          ),
-          if (hasPhoto) ...[
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: () => _shareWithPhoto(vendor),
-              icon: const Icon(Icons.image_outlined, size: 18),
-              label: const Text('Share with Photo'),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          FilledButton.icon(
+            onPressed: _sending ? null : () => _sendToVendor(vendor),
+            icon: _sending
+                ? const SizedBox(
+                    height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : Icon(hasPhoto ? Icons.image_outlined : Icons.message_outlined, size: 18),
+            label: Text(hasPhoto ? 'Send photo + message on WhatsApp' : 'Send message on WhatsApp'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(52),
+              backgroundColor: const Color(0xFF128C7E),
             ),
-          ],
-          const SizedBox(height: 20),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'After you press Send in WhatsApp, come back here — the next vendor opens automatically.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 16),
           TextButton(
-            onPressed: () => setState(() => _stepIndex++),
-            child: Text(_stepIndex == _selectedVendors.length - 1 ? 'Finish' : 'Next vendor'),
+            onPressed: () => setState(() {
+              _awaitingReturn = false;
+              _stepIndex++;
+            }),
+            child: Text(_stepIndex == _selectedVendors.length - 1 ? 'Skip & finish' : 'Skip this vendor'),
           ),
         ],
       ),

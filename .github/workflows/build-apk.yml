@@ -65,6 +65,32 @@ jobs:
       # permanent keystore (stored as a repo secret, generated once) and
       # uses it for every build from now on, so updates finally install
       # cleanly over the existing app.
+      # Promotions sends the product photo straight into a vendor's
+      # WhatsApp chat (whatsapp_share2). That needs (1) a FileProvider so
+      # WhatsApp is allowed to read the photo file, and (2) <queries>
+      # entries so Android 11+ lets the app detect WhatsApp / WhatsApp
+      # Business at all. Both are added to the freshly generated manifest.
+      - name: Configure WhatsApp photo sharing (FileProvider + queries)
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/provider_paths.xml << 'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <paths xmlns:android="http://schemas.android.com/apk/res/android">
+              <external-path name="external_files" path="." />
+              <external-files-path name="external_app_files" path="." />
+              <cache-path name="cache_files" path="." />
+          </paths>
+          XMLEOF
+          sed -i 's/^          //' android/app/src/main/res/xml/provider_paths.xml
+          sed -i 's#</application>#    <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.provider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/provider_paths" /></provider>\n    </application>#' $MANIFEST
+          if grep -q "<queries>" $MANIFEST; then
+            sed -i 's#<queries>#<queries>\n        <package android:name="com.whatsapp" />\n        <package android:name="com.whatsapp.w4b" />#' $MANIFEST
+          else
+            sed -i 's#</manifest>#    <queries>\n        <package android:name="com.whatsapp" />\n        <package android:name="com.whatsapp.w4b" />\n    </queries>\n</manifest>#' $MANIFEST
+          fi
+          cat $MANIFEST
+
       - name: Restore the permanent release signing key
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then

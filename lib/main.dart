@@ -9,6 +9,7 @@ import 'utils/app_logo.dart';
 import 'utils/locale_controller.dart';
 import 'utils/app_strings.dart';
 import 'utils/user_role.dart';
+import 'utils/session_lock.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -42,6 +43,7 @@ Future<void> _initializeAndRun() async {
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
     await LocaleController.instance.load();
+    await SessionLock.instance.load();
 
     // Crash reporting is wrapped in its own try/catch, deliberately
     // separate from the core initialization above — a failure here
@@ -163,7 +165,13 @@ class AuthGate extends StatelessWidget {
       initialData: FirebaseAuth.instance.currentUser,
       builder: (context, snapshot) {
         if (snapshot.data != null) {
-          return const RootNav();
+          // Signed in, but locked via Logout -> show the login screen,
+          // which can unlock offline against the stored fingerprint.
+          return ListenableBuilder(
+            listenable: SessionLock.instance,
+            builder: (context, _) =>
+                SessionLock.instance.isLocked ? const LoginScreen() : const RootNav(),
+          );
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
