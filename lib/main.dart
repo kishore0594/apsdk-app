@@ -43,19 +43,23 @@ Future<void> _initializeAndRun() async {
     );
     await LocaleController.instance.load();
 
-    // Routes real crashes to Firebase Crashlytics instead of only ever
-    // being diagnosed from a screenshot and a description — this is the
-    // single biggest gap in how bugs have been found and fixed in this
-    // app so far. Two separate hooks are needed for full coverage:
-    // FlutterError.onError catches errors from within Flutter's own
-    // framework (widget build/layout/paint errors); PlatformDispatcher's
-    // onError catches everything else — async code running outside that
-    // framework's error zone, which FlutterError.onError alone would miss.
-    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
-    WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
-      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-      return true;
-    };
+    // Crash reporting is wrapped in its own try/catch, deliberately
+    // separate from the core initialization above — a failure here
+    // should never be able to block the app from opening at all.
+    // Crash reporting is a "nice to have" for diagnosing problems, not
+    // something the app's actual usability should ever depend on; a
+    // shop owner needing to record a sale shouldn't be locked out
+    // because a crash-reporting tool itself failed to set up.
+    try {
+      FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+      WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        return true;
+      };
+    } catch (_) {
+      // Crash reporting itself isn't available for some reason — the
+      // app still runs normally below, just without it this session.
+    }
 
     runApp(const ApsdkApp());
   } catch (e, stack) {

@@ -174,6 +174,55 @@ jobs:
             echo "apply plugin: 'com.google.firebase.crashlytics'" >> android/app/build.gradle
           fi
 
+      # Firebase's own component-discovery mechanism looks up a specific
+      # registered class at runtime to confirm each Firebase product
+      # (Crashlytics included) is actually present — R8, Android's code
+      # shrinker, can strip or rename that class since nothing in this
+      # app's own code calls it directly, causing the exact runtime
+      # error seen here: "FirebaseCrashlytics component is not
+      # present." These are Firebase's own documented keep rules for
+      # this, applied defensively regardless of whether R8 is confirmed
+      # to be the cause — harmless if it isn't, since a keep rule simply
+      # does nothing when nothing would have stripped that class anyway.
+      - name: Add Crashlytics ProGuard/R8 keep rules
+        run: |
+          cat >> android/app/proguard-rules.pro << 'PROGUARDEOF'
+
+          # Firebase component discovery — keeps Crashlytics (and other
+          # Firebase products) discoverable by Firebase's own runtime
+          # lookup, which R8 can otherwise break by stripping or
+          # renaming the registrar classes it depends on.
+          -keep class com.google.firebase.components.ComponentRegistrar { *; }
+          -keep class * implements com.google.firebase.components.ComponentRegistrar
+          -keep class com.google.firebase.crashlytics.** { *; }
+          -keep interface com.google.firebase.crashlytics.** { *; }
+          -keepattributes SourceFile,LineNumberTable
+          -keep public class * extends java.lang.Exception
+          PROGUARDEOF
+          if [ -f "android/app/build.gradle.kts" ]; then
+            cat >> android/app/build.gradle.kts << 'PGCONFIGEOF'
+
+          android {
+              buildTypes {
+                  release {
+                      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+                  }
+              }
+          }
+          PGCONFIGEOF
+          elif [ -f "android/app/build.gradle" ]; then
+            cat >> android/app/build.gradle << 'PGCONFIGEOF'
+
+          android {
+              buildTypes {
+                  release {
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+              }
+          }
+          PGCONFIGEOF
+          fi
+
       - name: Install dependencies
         run: flutter pub get
 
