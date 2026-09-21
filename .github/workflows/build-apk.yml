@@ -91,6 +91,80 @@ jobs:
           fi
           cat $MANIFEST
 
+          # Native "send photo to one WhatsApp contact" handler. Written
+          # in-house (not a third-party plugin) so it can't break the
+          # build the way the unmaintained whatsapp_share2 package did.
+          # Keeps the package line Flutter generated, replaces the body.
+          MAIN=$(find android/app/src/main -name "MainActivity.kt" | head -1)
+          if [ -z "$MAIN" ]; then
+            echo "::error::MainActivity.kt not found — Android project layout changed."
+            exit 1
+          fi
+          PKG_LINE=$(grep -m1 '^package ' "$MAIN")
+          echo "$PKG_LINE" > "$MAIN"
+          cat >> "$MAIN" << 'KTEOF'
+
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import androidx.core.content.FileProvider
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import java.io.File
+
+          class MainActivity : FlutterActivity() {
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madhura/whatsapp")
+                      .setMethodCallHandler { call, result ->
+                          if (call.method != "sendImage") {
+                              result.notImplemented()
+                              return@setMethodCallHandler
+                          }
+                          try {
+                              val phone = call.argument<String>("phone") ?: ""
+                              val text = call.argument<String>("text") ?: ""
+                              val path = call.argument<String>("path") ?: ""
+                              val waPackage = listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull { isInstalled(it) }
+                              if (waPackage == null) {
+                                  result.success("not_installed")
+                                  return@setMethodCallHandler
+                              }
+                              val uri = FileProvider.getUriForFile(this, "$packageName.provider", File(path))
+                              val intent = Intent(Intent.ACTION_SEND).apply {
+                                  setPackage(waPackage)
+                                  type = "image/*"
+                                  putExtra(Intent.EXTRA_STREAM, uri)
+                                  putExtra(Intent.EXTRA_TEXT, text)
+                                  // WhatsApp's own field for "open this contact's chat".
+                                  putExtra("jid", "$phone@s.whatsapp.net")
+                                  addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                              }
+                              startActivity(intent)
+                              result.success("ok")
+                          } catch (e: Exception) {
+                              result.error("share_failed", e.message, null)
+                          }
+                      }
+              }
+
+              private fun isInstalled(pkg: String): Boolean = try {
+                  packageManager.getPackageInfo(pkg, 0)
+                  true
+              } catch (e: PackageManager.NameNotFoundException) {
+                  false
+              }
+          }
+          KTEOF
+          cat "$MAIN"
+
+          # FileProvider class used above lives in androidx.core.
+          if [ -f "android/app/build.gradle.kts" ]; then
+            printf '\ndependencies {\n    implementation("androidx.core:core:1.13.1")\n}\n' >> android/app/build.gradle.kts
+          else
+            printf "\ndependencies {\n    implementation 'androidx.core:core:1.13.1'\n}\n" >> android/app/build.gradle
+          fi
+
       - name: Restore the permanent release signing key
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then

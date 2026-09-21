@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:whatsapp_share2/whatsapp_share2.dart';
 import '../db/db_helper.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_info.dart';
@@ -17,6 +17,7 @@ class PromotionsScreen extends StatefulWidget {
 }
 
 class _PromotionsScreenState extends State<PromotionsScreen> with WidgetsBindingObserver {
+  static const _waChannel = MethodChannel('madhura/whatsapp');
   final _db = DBHelper.instance;
   final _messageEnCtrl = TextEditingController();
   final _messageTaCtrl = TextEditingController();
@@ -174,7 +175,7 @@ class _PromotionsScreenState extends State<PromotionsScreen> with WidgetsBinding
   /// Opens THIS vendor's WhatsApp chat directly, with the product photo
   /// (if any) and the message already attached — you only press Send.
   ///
-  /// Photo: uses WhatsApp's own direct-to-contact share (whatsapp_share2).
+  /// Photo: native WhatsApp direct-to-contact share (see MainActivity).
   /// Known WhatsApp limitation: this jumps straight into the chat only
   /// for numbers you have chatted with before; for a brand-new number,
   /// WhatsApp shows its own contact list instead (photo still attached).
@@ -194,19 +195,18 @@ class _PromotionsScreenState extends State<PromotionsScreen> with WidgetsBinding
         final dir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
         final file = File('${dir.path}/promo_${DateTime.now().millisecondsSinceEpoch}.jpg');
         await file.writeAsBytes(base64Decode(photo));
-        final hasWa = await WhatsappShare.isInstalled(package: Package.whatsapp) ?? false;
-        final hasBiz = !hasWa && (await WhatsappShare.isInstalled(package: Package.businessWhatsapp) ?? false);
-        if (hasWa || hasBiz) {
-          _awaitingReturn = true;
-          await WhatsappShare.shareFile(
-            phone: digits,
-            text: message,
-            filePath: [file.path],
-            package: hasWa ? Package.whatsapp : Package.businessWhatsapp,
-          );
-        } else {
+        // Native Android code in MainActivity (added by the build
+        // workflow) opens WhatsApp / WhatsApp Business straight on this
+        // vendor's chat with the photo attached. Written in-house
+        // instead of a third-party package, which broke the build.
+        _awaitingReturn = true;
+        final outcome = await _waChannel.invokeMethod<String>('sendImage', {
+          'phone': digits,
+          'text': message,
+          'path': file.path,
+        });
+        if (outcome == 'not_installed') {
           // WhatsApp not found — fall back to the normal share sheet.
-          _awaitingReturn = true;
           await Share.shareXFiles([XFile(file.path)], text: message);
         }
       } else {
