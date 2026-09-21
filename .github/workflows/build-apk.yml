@@ -154,19 +154,23 @@ jobs:
 
       # Wires the Crashlytics Gradle plugin the same way as Google
       # Services above, for crash reporting (firebase_crashlytics).
-      # Deliberately the 2.x plugin line, not the newer v3.0.0 — v3 is a
-      # breaking major version with its own stricter minimum AGP/Google-
-      # Services requirements, and given this project's build already
-      # regenerates its Android project fresh on every run, the older,
-      # more broadly-compatible line is the safer choice without a real
-      # device to test the newer one against first.
+      # Uses v3.0.0, not the older 2.x line — 2.x was tried first as the
+      # more conservative choice, but failed a real build with a missing
+      # groovy/util/XmlSlurper class, a known symptom of an old plugin
+      # built against an older Gradle's bundled Groovy running under a
+      # much newer one. v3.0.0 is Firebase's own current stable release,
+      # specifically built to resolve compatibility issues with AGP
+      # 8.1+ — the version already in use here. It doesn't touch the
+      # Crashlytics extension block (mappingFile, defaultConfig), so the
+      # breaking changes v3 introduces for those don't apply, since this
+      # setup never configured them.
       - name: Apply Crashlytics Gradle plugin
         run: |
           if [ -f "android/settings.gradle.kts" ]; then
-            sed -i '/^plugins {/a\    id("com.google.firebase.crashlytics") version "2.9.9" apply false' android/settings.gradle.kts
+            sed -i '/^plugins {/a\    id("com.google.firebase.crashlytics") version "3.0.0" apply false' android/settings.gradle.kts
             sed -i '/dev.flutter.flutter-gradle-plugin/a\    id("com.google.firebase.crashlytics")' android/app/build.gradle.kts
           elif [ -f "android/build.gradle" ]; then
-            sed -i "/dependencies {/a\\        classpath 'com.google.firebase:firebase-crashlytics-gradle:2.9.9'" android/build.gradle
+            sed -i "/dependencies {/a\\        classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.0'" android/build.gradle
             echo "apply plugin: 'com.google.firebase.crashlytics'" >> android/app/build.gradle
           fi
 
