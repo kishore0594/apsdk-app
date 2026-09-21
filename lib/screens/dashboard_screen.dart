@@ -23,6 +23,7 @@ import 'expenses_screen.dart';
 import 'change_password_screen.dart';
 import 'promotions_screen.dart';
 import 'manage_users_screen.dart';
+import '../utils/chart_style.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -288,12 +289,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final (periodStart, periodEnd) = _periodRange();
     final productTotals = <String, double>{};
     final paymentTotals = <String, double>{};
+    // Share of each bill actually charged after its discount, so the
+    // product pie adds up to real revenue (item prices are pre-discount).
+    final saleFactor = <String, double>{};
+    for (final s in _rawSales) {
+      final total = (s['total_amount'] as num?)?.toDouble() ?? 0;
+      final discount = (s['discount'] as num?)?.toDouble() ?? 0;
+      saleFactor[s['id'] as String] = (total + discount) > 0 ? total / (total + discount) : 1;
+    }
     for (final item in _rawSaleItems) {
       if (item['status'] == 'cancelled') continue;
       final saleDate = item['sale_date'] as String? ?? '';
       if (saleDate.compareTo(periodStart) < 0 || saleDate.compareTo(periodEnd) >= 0) continue;
       final name = item['product_name'] as String? ?? '';
-      productTotals[name] = (productTotals[name] ?? 0) + ((item['subtotal'] as num?)?.toDouble() ?? 0);
+      productTotals[name] = (productTotals[name] ?? 0) +
+          ((item['subtotal'] as num?)?.toDouble() ?? 0) * (saleFactor[item['sale_id']] ?? 1);
     }
     for (final s in _rawSales) {
       if (s['status'] == 'cancelled') continue;
@@ -877,6 +887,7 @@ class _WeeklyChart extends StatelessWidget {
     }
     return BarChart(
       BarChartData(
+        barTouchData: ChartStyle.barTouch([for (final d in data) d['day'] as String? ?? '']),
         barGroups: bars,
         gridData: const FlGridData(show: false),
         borderData: FlBorderData(show: false),
@@ -961,7 +972,11 @@ class _PieChartCard extends StatelessWidget {
                         PieChartSectionData(
                           value: sorted[i].value,
                           color: _pieColors[i % _pieColors.length],
-                          title: '${(sorted[i].value / total * 100).toStringAsFixed(0)}%',
+                          // Slices under 6% are too thin for a readable
+                          // label — their % is shown in the legend below.
+                          title: sorted[i].value / total >= 0.06
+                              ? '${(sorted[i].value / total * 100).toStringAsFixed(0)}%'
+                              : '',
                           radius: 55,
                           titleStyle: const TextStyle(
                               fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
@@ -988,6 +1003,8 @@ class _PieChartCard extends StatelessWidget {
                       Expanded(
                           child: Text(sorted[i].label,
                               overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5))),
+                      Text('${(sorted[i].value / total * 100).toStringAsFixed(0)}%  ',
+                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
                       Text(formatCurrency(sorted[i].value),
                           style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
                     ],

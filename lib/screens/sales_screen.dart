@@ -6,6 +6,7 @@ import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
 import '../utils/user_role.dart';
+import '../utils/chart_style.dart';
 
 // Units sold by weight/volume need decimal quantities (e.g. 0.75 Kgs).
 // Count-based units (Nos, Box, Dozen, Packet...) stay whole numbers.
@@ -36,7 +37,73 @@ class SalesScreen extends StatefulWidget {
 class _SalesScreenState extends State<SalesScreen> {
   final _db = DBHelper.instance;
   List<Map<String, dynamic>> _monthlyTrend = [];
-  bool _todayOnly = true;
+  /// The single day being viewed (defaults to today); null = all sales.
+  DateTime? _day = DateTime.now();
+
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+  bool get _isToday => _day != null && _dateOnly(_day!) == _dateOnly(DateTime.now());
+
+  String get _dayLabel {
+    if (_day == null) return 'All sales';
+    final diff = _dateOnly(DateTime.now()).difference(_dateOnly(_day!)).inDays;
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Yesterday';
+    return formatDay(_day!.toIso8601String());
+  }
+
+  Future<void> _pickDay() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _day ?? DateTime.now(),
+      firstDate: DateTime(2015),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) setState(() => _day = picked);
+  }
+
+  /// ◀ previous day · tap date for calendar · next day ▶ · All
+  Widget _dayBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: 'Previous day',
+            icon: const Icon(Icons.chevron_left),
+            onPressed: () => setState(() =>
+                _day = (_day ?? DateTime.now()).subtract(const Duration(days: 1))),
+          ),
+          Expanded(
+            child: TextButton.icon(
+              onPressed: _pickDay,
+              icon: const Icon(Icons.calendar_today, size: 16),
+              label: Text(_dayLabel, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Next day',
+            icon: const Icon(Icons.chevron_right),
+            onPressed: (_day == null || _isToday)
+                ? null
+                : () => setState(() => _day = _day!.add(const Duration(days: 1))),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: ChoiceChip(
+              label: const Text('All'),
+              selected: _day == null,
+              onSelected: (on) => setState(() => _day = on ? null : DateTime.now()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -253,19 +320,10 @@ class _SalesScreenState extends State<SalesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(AppStrings.t('sales_title')),
-        actions: [
-          IconButton(
-            icon: Icon(_todayOnly ? Icons.today : Icons.calendar_month),
-            tooltip: _todayOnly ? 'Showing today — tap for all' : 'Showing all — tap for today',
-            onPressed: () {
-              setState(() => _todayOnly = !_todayOnly);
-            },
-          ),
-        ],
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _db.watchSales(
-            dateFilter: _todayOnly ? DateTime.now().toIso8601String().substring(0, 10) : null),
+            dateFilter: _day?.toIso8601String().substring(0, 10)),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text("${AppStrings.t('could_not_load_sales')}: ${snapshot.error}"));
@@ -280,9 +338,12 @@ class _SalesScreenState extends State<SalesScreen> {
 
           return Column(
             children: [
+              _dayBar(),
               SummaryBanner(
                 icon: Icons.receipt_long_outlined,
-                label: _todayOnly ? AppStrings.t('todays_sales') : AppStrings.t('total'),
+                label: _day == null
+                    ? AppStrings.t('total')
+                    : (_isToday ? AppStrings.t('todays_sales') : 'Sales · $_dayLabel'),
                 value: formatCurrency(total),
                 color: AppTheme.revenue,
                 caption: '$activeCount bills',
@@ -1027,6 +1088,7 @@ class _MonthlyTrendChart extends StatelessWidget {
     }
     return LineChart(
       LineChartData(
+        lineTouchData: ChartStyle.lineTouch([for (final d in data) d['day'] as String? ?? '']),
         gridData: const FlGridData(show: false),
         borderData: FlBorderData(show: false),
         titlesData: FlTitlesData(

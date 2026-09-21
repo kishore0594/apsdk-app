@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Firestore-backed data layer for Madhura Agro Traders. Replaces the old
@@ -36,6 +38,26 @@ class DBHelper {
   DBHelper._internal();
   static final DBHelper instance = DBHelper._internal();
 
+  /// Every save in the app goes through this.
+  ///
+  /// Firestore stores a write on the phone INSTANTLY (screens update and
+  /// the data is safe), but the Future it returns only completes when
+  /// the SERVER confirms — which, offline, never happens. Awaiting it
+  /// directly froze every save button while offline (sales, payments,
+  /// vendors, expenses...). This waits briefly so genuine online errors
+  /// still surface, then moves on: the write is already queued and syncs
+  /// automatically when the connection returns.
+  Future<void> _write(Future<void> op) async {
+    try {
+      await op.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      // Offline or slow network: saved on the phone, queued for sync.
+      op.catchError((Object e) {
+        debugPrint('Queued write failed when syncing: $e');
+      });
+    }
+  }
+
   final FirebaseFirestore _fs = FirebaseFirestore.instance;
 
   CollectionReference get _products => _fs.collection('products');
@@ -48,6 +70,7 @@ class DBHelper {
   CollectionReference get _supplierPurchaseItems => _fs.collection('supplier_purchase_items');
   CollectionReference get _stockMovements => _fs.collection('stock_movements');
   CollectionReference get _expenses => _fs.collection('expenses');
+  CollectionReference get _vendorPlaces => _fs.collection('vendor_places');
 
   Map<String, dynamic> _withId(DocumentSnapshot doc) {
     final data = (doc.data() as Map<String, dynamic>?) ?? {};
@@ -96,25 +119,26 @@ class DBHelper {
 
   Future<String> insertProduct(Map<String, dynamic> product) async {
     final now = DateTime.now().toIso8601String();
-    final ref = await _products.add({
+    final ref = _products.doc();
+    await _write(ref.set({
       ...product,
       'name_lower': (product['name'] as String).toLowerCase(),
       'created_at': product['created_at'] ?? now,
       'updated_at': now,
-    });
+    }));
     return ref.id;
   }
 
   Future<void> updateProduct(String id, Map<String, dynamic> product) async {
-    await _products.doc(id).update({
+    await _write(_products.doc(id).update({
       ...product,
       if (product['name'] != null) 'name_lower': (product['name'] as String).toLowerCase(),
       'updated_at': DateTime.now().toIso8601String(),
-    });
+    }));
   }
 
   Future<void> deleteProduct(String id) async {
-    await _products.doc(id).delete();
+    await _write(_products.doc(id).delete());
   }
 
   Future<List<Map<String, dynamic>>> getProducts({String? search}) async {
@@ -181,7 +205,7 @@ class DBHelper {
       'reason': reason,
       'notes': notes,
     });
-    await batch.commit();
+    await _write(batch.commit());
   }
 
   Future<List<Map<String, dynamic>>> getStockHistory(String productId) async {
@@ -197,11 +221,12 @@ class DBHelper {
   // ---------------- SUPPLIERS ----------------
 
   Future<String> insertSupplier(Map<String, dynamic> supplier) async {
-    final ref = await _suppliers.add({
+    final ref = _suppliers.doc();
+    await _write(ref.set({
       ...supplier,
       'name_lower': (supplier['name'] as String).toLowerCase(),
       'balance': (supplier['opening_balance'] as num?)?.toDouble() ?? 0,
-    });
+    }));
     return ref.id;
   }
 
@@ -232,18 +257,18 @@ class DBHelper {
 
   /// Edits a supplier's own profile fields — never touches their balance.
   Future<void> updateSupplier(String supplierId, {String? name, String? phone, String? address}) async {
-    await _suppliers.doc(supplierId).update({
+    await _write(_suppliers.doc(supplierId).update({
       if (name != null) 'name': name,
       if (name != null) 'name_lower': name.toLowerCase(),
       if (phone != null) 'phone': phone,
       if (address != null) 'address': address,
-    });
+    }));
   }
 
   /// Deletes a supplier profile — see deleteVendor for the same
   /// keep-the-audit-trail reasoning.
   Future<void> deleteSupplier(String supplierId) async {
-    await _suppliers.doc(supplierId).delete();
+    await _write(_suppliers.doc(supplierId).delete());
   }
 
   Future<double> getSupplierBalance(String supplierId) async {
@@ -281,7 +306,7 @@ class DBHelper {
       'notes': notes,
     });
     batch.update(supplierRef, {'balance': newBalance});
-    await batch.commit();
+    await _write(batch.commit());
   }
 
   Future<List<Map<String, dynamic>>> getSupplierTransactions(String supplierId) async {
@@ -371,7 +396,7 @@ class DBHelper {
         });
       }
     }
-    await batch.commit();
+    await _write(batch.commit());
 
     return txnRef.id;
   }
@@ -386,12 +411,51 @@ class DBHelper {
   // ---------------- VENDORS (CREDIT CUSTOMERS) ----------------
 
   Future<String> insertVendor(Map<String, dynamic> vendor) async {
-    final ref = await _vendors.add({
+    final ref = _vendors.doc();
+    await _write(ref.set({
       ...vendor,
       'name_lower': (vendor['name'] as String).toLowerCase(),
       'balance': (vendor['opening_balance'] as num?)?.toDouble() ?? 0,
-    });
+    }));
     return ref.id;
+  }
+
+  // ---------------- VENDOR PLACES ----------------
+  // A managed list of places, picked from a dropdown instead of typed
+  // freely (so "Pollachi" and "pollachi " never become two groups).
+  // Document id = lower-cased name, so adding the same place twice is
+  // harmless. First use seeds the list from places vendors already have.
+
+  String _placeKey(String name) => name.trim().toLowerCase().replaceAll('/', '-');
+
+  Future<List<String>> getVendorPlaces() async {
+    var snap = await _vendorPlaces.get();
+    if (snap.docs.isEmpty) {
+      final existing = (await getVendors())
+          .map((v) => (v['address'] as String? ?? '').trim())
+          .where((p) => p.isNotEmpty)
+          .toSet();
+      for (final p in existing) {
+        await _write(_vendorPlaces.doc(_placeKey(p)).set({'name': p}));
+      }
+      return existing.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    }
+    final names = snap.docs
+        .map((d) => ((d.data() as Map<String, dynamic>)['name'] as String? ?? '').trim())
+        .where((n) => n.isNotEmpty)
+        .toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return names;
+  }
+
+  Future<void> addVendorPlace(String name) async {
+    final clean = name.trim();
+    if (clean.isEmpty) return;
+    await _write(_vendorPlaces.doc(_placeKey(clean)).set({'name': clean}));
+  }
+
+  Future<void> deleteVendorPlace(String name) async {
+    await _write(_vendorPlaces.doc(_placeKey(name)).delete());
   }
 
   Future<List<Map<String, dynamic>>> getVendors() async {
@@ -419,12 +483,12 @@ class DBHelper {
   /// Edits a vendor's own profile fields — never touches their balance,
   /// so it can't be used (accidentally or otherwise) to alter what's owed.
   Future<void> updateVendor(String vendorId, {String? name, String? phone, String? address}) async {
-    await _vendors.doc(vendorId).update({
+    await _write(_vendors.doc(vendorId).update({
       if (name != null) 'name': name,
       if (name != null) 'name_lower': name.toLowerCase(),
       if (phone != null) 'phone': phone,
       if (address != null) 'address': address,
-    });
+    }));
   }
 
   /// Deletes a vendor profile. Their past credit_transactions rows are
@@ -432,7 +496,7 @@ class DBHelper {
   /// sales) — they'll just no longer resolve to a vendor name in the app,
   /// though they still show in a data export.
   Future<void> deleteVendor(String vendorId) async {
-    await _vendors.doc(vendorId).delete();
+    await _write(_vendors.doc(vendorId).delete());
   }
 
   Future<double> getVendorBalance(String vendorId) async {
@@ -473,7 +537,7 @@ class DBHelper {
       'sale_id': saleId,
     });
     batch.update(vendorRef, {'balance': newBalance});
-    await batch.commit();
+    await _write(batch.commit());
   }
 
   Future<List<Map<String, dynamic>>> getVendorTransactions(String vendorId) async {
@@ -790,11 +854,11 @@ class DBHelper {
   // working unchanged.
 
   Future<void> createUserRoleDoc(String uid, String email) async {
-    await _fs.collection('users').doc(uid).set({
+    await _write(_fs.collection('users').doc(uid).set({
       'email': email,
       'role': 'viewer',
       'created_at': DateTime.now().toIso8601String(),
-    });
+    }));
   }
 
   Stream<List<Map<String, dynamic>>> watchUserRoles() {
@@ -802,7 +866,7 @@ class DBHelper {
   }
 
   Future<void> setUserRole(String uid, String role) async {
-    await _fs.collection('users').doc(uid).set({'role': role}, SetOptions(merge: true));
+    await _write(_fs.collection('users').doc(uid).set({'role': role}, SetOptions(merge: true)));
   }
 
   // ---------------- OPERATING EXPENSES ----------------
@@ -817,13 +881,14 @@ class DBHelper {
     String? notes,
     String? date,
   }) async {
-    final doc = await _expenses.add({
+    final doc = _expenses.doc();
+    await _write(doc.set({
       'category': category,
       'amount': amount,
       'notes': notes,
       'date': date ?? DateTime.now().toIso8601String(),
       'created_at': DateTime.now().toIso8601String(),
-    });
+    }));
     return doc.id;
   }
 
@@ -834,16 +899,16 @@ class DBHelper {
     String? notes,
     required String date,
   }) async {
-    await _expenses.doc(id).update({
+    await _write(_expenses.doc(id).update({
       'category': category,
       'amount': amount,
       'notes': notes,
       'date': date,
-    });
+    }));
   }
 
   Future<void> deleteExpense(String id) async {
-    await _expenses.doc(id).delete();
+    await _write(_expenses.doc(id).delete());
   }
 
   /// Live list of expenses within a date range, newest first — powers the
@@ -1021,7 +1086,7 @@ class DBHelper {
       }
     }
 
-    await batch.commit();
+    await _write(batch.commit());
     return saleRef.id;
   }
 
@@ -1119,7 +1184,7 @@ class DBHelper {
       });
     }
 
-    await batch.commit();
+    await _write(batch.commit());
   }
 
   Future<List<Map<String, dynamic>>> getSales({String? dateFilter}) async {
@@ -1204,12 +1269,14 @@ class DBHelper {
     final snap = await _getCacheFirst(_saleItems
         .where('sale_date', isGreaterThanOrEqualTo: startIso)
         .where('sale_date', isLessThan: endIsoExclusive));
+    final factor = await _saleDiscountFactors(startIso, endIsoExclusive);
     final totals = <String, double>{};
     for (final doc in snap.docs) {
       final data = doc.data() as Map<String, dynamic>;
       if (data['status'] == 'cancelled') continue;
       final name = data['product_name'] as String;
-      totals[name] = (totals[name] ?? 0) + ((data['subtotal'] as num?)?.toDouble() ?? 0);
+      totals[name] = (totals[name] ?? 0) +
+          ((data['subtotal'] as num?)?.toDouble() ?? 0) * (factor[data['sale_id']] ?? 1);
     }
     final result = totals.entries.map((e) => {'name': e.key, 'total': e.value}).toList();
     result.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
@@ -1317,54 +1384,102 @@ class DBHelper {
     return {'cash_collected': cashCollected, 'credit_payments_collected': creditPaymentsCollected};
   }
 
-  /// Sales broken down by product category for a date range — feeds the
-  /// "By Category" section of Reports & Trends. Products added before
-  /// this feature existed (or with no category set) group under "—".
-  Future<List<Map<String, dynamic>>> getCategoryWiseSales({
+  /// sale id -> fraction of the bill's pre-discount amount actually
+  /// charged. Item prices are stored BEFORE the bill's discount; scaling
+  /// by this makes item-level breakdowns add up to real revenue.
+  Future<Map<String, double>> _saleDiscountFactors(String startIso, String endIsoExclusive) async {
+    final salesSnap = await _sales
+        .where('date', isGreaterThanOrEqualTo: startIso)
+        .where('date', isLessThan: endIsoExclusive)
+        .get();
+    final factor = <String, double>{};
+    for (final d in salesSnap.docs) {
+      final m = d.data() as Map<String, dynamic>;
+      final total = (m['total_amount'] as num?)?.toDouble() ?? 0;
+      final discount = (m['discount'] as num?)?.toDouble() ?? 0;
+      final gross = total + discount;
+      factor[d.id] = gross > 0 ? total / gross : 1;
+    }
+    return factor;
+  }
+
+  /// Shared engine for "By Category" and "By Subcategory" in Reports.
+  ///
+  /// Fixes three things that made the breakdown look wrong:
+  ///  1. Discount — item prices are BEFORE the bill's discount, but
+  ///     Revenue is AFTER it, so the breakdown never added up to Revenue.
+  ///     Each item now carries its fair share of its bill's discount.
+  ///  2. Older sales — category/subcategory were only snapshotted on
+  ///     sales made after that feature existed. Missing values now fall
+  ///     back to the product's current category instead of "—".
+  ///  3. Name variations — "Feed" and "feed " were separate rows, and the
+  ///     same subcategory name under two categories got merged. Names
+  ///     are tidied, and subcategories are shown as "Category › Sub".
+  Future<List<Map<String, dynamic>>> _salesBreakdown({
     required String startIso,
     required String endIsoExclusive,
+    required bool bySubcategory,
   }) async {
-    final snap = await _saleItems
+    final itemsSnap = await _saleItems
         .where('sale_date', isGreaterThanOrEqualTo: startIso)
         .where('sale_date', isLessThan: endIsoExclusive)
         .get();
+    final factor = await _saleDiscountFactors(startIso, endIsoExclusive);
+    final productsSnap = await _products.get();
+    final productInfo = <String, Map<String, dynamic>>{
+      for (final d in productsSnap.docs) d.id: d.data() as Map<String, dynamic>
+    };
+
+    String tidy(String? v) {
+      final t = (v ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (t.isEmpty) return '';
+      return t[0].toUpperCase() + t.substring(1);
+    }
+
     final totals = <String, double>{};
-    for (final doc in snap.docs) {
+    final display = <String, String>{};
+    for (final doc in itemsSnap.docs) {
       final data = doc.data() as Map<String, dynamic>;
       if (data['status'] == 'cancelled') continue;
-      final category = (data['category'] as String?)?.trim();
-      final key = (category == null || category.isEmpty) ? '—' : category;
-      totals[key] = (totals[key] ?? 0) + ((data['subtotal'] as num?)?.toDouble() ?? 0);
+      final product = productInfo[data['product_id']];
+      var category = tidy(data['category'] as String?);
+      if (category.isEmpty) category = tidy(product?['category'] as String?);
+      var sub = tidy(data['subcategory'] as String?);
+      if (sub.isEmpty) sub = tidy(product?['subcategory'] as String?);
+
+      final String label;
+      if (bySubcategory) {
+        if (sub.isEmpty) {
+          label = category.isEmpty ? '—' : '$category › —';
+        } else {
+          label = category.isEmpty ? sub : '$category › $sub';
+        }
+      } else {
+        label = category.isEmpty ? '—' : category;
+      }
+      final key = label.toLowerCase();
+      display.putIfAbsent(key, () => label);
+      final amount = ((data['subtotal'] as num?)?.toDouble() ?? 0) * (factor[data['sale_id']] ?? 1);
+      totals[key] = (totals[key] ?? 0) + amount;
     }
-    final result = totals.entries.map((e) => {'category': e.key, 'total': e.value}).toList();
+    final field = bySubcategory ? 'subcategory' : 'category';
+    final result =
+        totals.entries.map((e) => {field: display[e.key]!, 'total': e.value}).toList();
     result.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
     return result;
   }
 
-  /// Same as getCategoryWiseSales, but grouped by subcategory — feeds the
-  /// "By Subcategory" section of Reports & Trends. Only sales made after
-  /// subcategory-snapshotting was added will have this field; older sale
-  /// items group under "—" along with products that have no subcategory.
+  Future<List<Map<String, dynamic>>> getCategoryWiseSales({
+    required String startIso,
+    required String endIsoExclusive,
+  }) =>
+      _salesBreakdown(startIso: startIso, endIsoExclusive: endIsoExclusive, bySubcategory: false);
+
   Future<List<Map<String, dynamic>>> getSubcategoryWiseSales({
     required String startIso,
     required String endIsoExclusive,
-  }) async {
-    final snap = await _saleItems
-        .where('sale_date', isGreaterThanOrEqualTo: startIso)
-        .where('sale_date', isLessThan: endIsoExclusive)
-        .get();
-    final totals = <String, double>{};
-    for (final doc in snap.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      if (data['status'] == 'cancelled') continue;
-      final subcategory = (data['subcategory'] as String?)?.trim();
-      final key = (subcategory == null || subcategory.isEmpty) ? '—' : subcategory;
-      totals[key] = (totals[key] ?? 0) + ((data['subtotal'] as num?)?.toDouble() ?? 0);
-    }
-    final result = totals.entries.map((e) => {'subcategory': e.key, 'total': e.value}).toList();
-    result.sort((a, b) => (b['total'] as double).compareTo(a['total'] as double));
-    return result;
-  }
+  }) =>
+      _salesBreakdown(startIso: startIso, endIsoExclusive: endIsoExclusive, bySubcategory: true);
 
   /// Total currently owed to all suppliers combined — the supplier-side
   /// counterpart to getTotalOutstandingCredit.
@@ -1424,19 +1539,19 @@ class DBHelper {
         await _products.where('name_lower', isEqualTo: name.toLowerCase()).limit(1).get();
     final now = DateTime.now().toIso8601String();
     if (existing.docs.isNotEmpty) {
-      await existing.docs.first.reference.update({
+      await _write(existing.docs.first.reference.update({
         ...data,
         'name_lower': name.toLowerCase(),
         'updated_at': now,
-      });
+      }));
       return true;
     } else {
-      await _products.add({
+      await _write(_products.doc().set({
         ...data,
         'name_lower': name.toLowerCase(),
         'created_at': now,
         'updated_at': now,
-      });
+      }));
       return false;
     }
   }
@@ -1454,13 +1569,13 @@ class DBHelper {
         .limit(1)
         .get();
     if (existing.docs.isNotEmpty) {
-      await existing.docs.first.reference.update({
+      await _write(existing.docs.first.reference.update({
         if (phone != null) 'phone': phone,
         if (address != null) 'address': address,
-      });
+      }));
       return true;
     } else {
-      await _vendors.add({
+      await _write(_vendors.doc().set({
         'name': name.trim(),
         'name_lower': name.trim().toLowerCase(),
         'phone': phone ?? '',
@@ -1468,7 +1583,7 @@ class DBHelper {
         'opening_balance': 0,
         'balance': 0,
         'created_at': DateTime.now().toIso8601String(),
-      });
+      }));
       return false;
     }
   }
@@ -1484,13 +1599,13 @@ class DBHelper {
         .limit(1)
         .get();
     if (existing.docs.isNotEmpty) {
-      await existing.docs.first.reference.update({
+      await _write(existing.docs.first.reference.update({
         if (phone != null) 'phone': phone,
         if (address != null) 'address': address,
-      });
+      }));
       return true;
     } else {
-      await _suppliers.add({
+      await _write(_suppliers.doc().set({
         'name': name.trim(),
         'name_lower': name.trim().toLowerCase(),
         'phone': phone ?? '',
@@ -1498,7 +1613,7 @@ class DBHelper {
         'opening_balance': 0,
         'balance': 0,
         'created_at': DateTime.now().toIso8601String(),
-      });
+      }));
       return false;
     }
   }

@@ -140,14 +140,43 @@ class _VendorsScreenState extends State<VendorsScreen> {
     );
   }
 
+  Future<String?> _pickPlace(String current) async {
+    final places = await _db.getVendorPlaces();
+    final vendors = await _db.getVendors();
+    final inUse = vendors.map((v) => (v['address'] as String? ?? '').trim().toLowerCase()).toSet();
+    if (!mounted) return null;
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _PlacePickerSheet(places: places, current: current, placesInUse: inUse),
+    );
+  }
+
+  /// Looks like a dropdown field; tapping it opens the places list.
+  Widget _placeField(String place, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: AppStrings.t('place'),
+          suffixIcon: const Icon(Icons.arrow_drop_down),
+        ),
+        child: Text(
+          place.isEmpty ? 'Select place' : place,
+          style: TextStyle(color: place.isEmpty ? Colors.black45 : null),
+        ),
+      ),
+    );
+  }
+
   Future<void> _addVendor() async {
     final allVendors = await _db.getVendors();
     final nameSuggestions = _distinctValues(allVendors, 'name');
     final phoneSuggestions = _distinctValues(allVendors, 'phone');
-    final placeSuggestions = _distinctValues(allVendors, 'address');
     TextEditingController? nameFieldCtrl;
     TextEditingController? phoneFieldCtrl;
-    TextEditingController? placeFieldCtrl;
+    String place = '';
     final openingCtrl = TextEditingController(text: '0');
     DateTime creditDate = DateTime.now();
 
@@ -174,12 +203,10 @@ class _VendorsScreenState extends State<VendorsScreen> {
                   captureController: (c) => phoneFieldCtrl = c,
                 ),
                 const SizedBox(height: 8),
-                _suggestField(
-                  label: AppStrings.t('place'),
-                  initialValue: '',
-                  suggestions: placeSuggestions,
-                  captureController: (c) => placeFieldCtrl = c,
-                ),
+                _placeField(place, () async {
+                  final picked = await _pickPlace(place);
+                  if (picked != null) setDialogState(() => place = picked);
+                }),
                 const SizedBox(height: 8),
                 TextField(
                   controller: openingCtrl,
@@ -223,7 +250,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
       final newVendorId = await _db.insertVendor({
         'name': vendorName,
         'phone': phoneFieldCtrl?.text.trim() ?? '',
-        'address': placeFieldCtrl?.text.trim() ?? '',
+        'address': place,
         'opening_balance': 0,
         'created_at': DateTime.now().toIso8601String(),
       });
@@ -283,14 +310,14 @@ class _VendorsScreenState extends State<VendorsScreen> {
     final allVendors = await _db.getVendors();
     final nameSuggestions = _distinctValues(allVendors, 'name');
     final phoneSuggestions = _distinctValues(allVendors, 'phone');
-    final placeSuggestions = _distinctValues(allVendors, 'address');
     TextEditingController? nameFieldCtrl;
     TextEditingController? phoneFieldCtrl;
-    TextEditingController? placeFieldCtrl;
+    String place = (vendor['address'] as String? ?? '').trim();
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
         title: Text(AppStrings.t('edit_vendor')),
         content: SingleChildScrollView(
           child: Column(
@@ -310,12 +337,10 @@ class _VendorsScreenState extends State<VendorsScreen> {
                 captureController: (c) => phoneFieldCtrl = c,
               ),
               const SizedBox(height: 8),
-              _suggestField(
-                label: AppStrings.t('place'),
-                initialValue: vendor['address'] as String? ?? '',
-                suggestions: placeSuggestions,
-                captureController: (c) => placeFieldCtrl = c,
-              ),
+              _placeField(place, () async {
+                final picked = await _pickPlace(place);
+                if (picked != null) setDialogState(() => place = picked);
+              }),
             ],
           ),
         ),
@@ -323,6 +348,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
         ],
+      ),
       ),
     );
     final newName = nameFieldCtrl?.text.trim() ?? '';
@@ -332,7 +358,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
         vendor['id'] as String,
         name: newName,
         phone: phoneFieldCtrl?.text.trim() ?? '',
-        address: placeFieldCtrl?.text.trim() ?? '',
+        address: place,
       );
     } catch (e) {
       if (mounted) {
@@ -581,7 +607,9 @@ class _VendorsScreenState extends State<VendorsScreen> {
                     : const SizedBox.shrink(),
               ],
             ),
-            if (owes) ...[
+            // Ledger is ALWAYS shown — a vendor who has paid up keeps
+            // their full history. Only Payment / Remind need a balance.
+            ...[
               const Divider(height: 22),
               Row(
                 children: [
@@ -596,7 +624,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                       style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
                     ),
                   ),
-                  if (UserRole.instance.isAdmin) ...[
+                  if (owes && UserRole.instance.isAdmin) ...[
                     const SizedBox(width: 10),
                     Expanded(
                       child: FilledButton.icon(
@@ -839,6 +867,12 @@ class _VendorsScreenState extends State<VendorsScreen> {
       appBar: AppBar(
         title: Text(AppStrings.t('vendor_credit')),
         actions: [
+          if (UserRole.instance.isAdmin)
+            IconButton(
+              tooltip: 'Manage places',
+              icon: const Icon(Icons.edit_location_alt_outlined),
+              onPressed: () => _pickPlace(''),
+            ),
           IconButton(
             tooltip: 'What do these mean?',
             icon: const Icon(Icons.info_outline),
@@ -1245,6 +1279,127 @@ class _TransactionTile extends StatelessWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+/// Searchable list of vendor places with "+ Add new place" — replaces
+/// free-text typing so the same place is always spelled the same way.
+/// Returns the chosen place via Navigator.pop, or null if dismissed.
+class _PlacePickerSheet extends StatefulWidget {
+  final List<String> places;
+  final String current;
+  final Set<String> placesInUse;
+  const _PlacePickerSheet({required this.places, required this.current, required this.placesInUse});
+
+  @override
+  State<_PlacePickerSheet> createState() => _PlacePickerSheetState();
+}
+
+class _PlacePickerSheetState extends State<_PlacePickerSheet> {
+  late List<String> _places = List.of(widget.places);
+  String _query = '';
+
+  Future<void> _addPlace() async {
+    final ctrl = TextEditingController(text: _query);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add new place'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(labelText: 'Place name'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    final existing = _places.firstWhere((p) => p.toLowerCase() == name.toLowerCase(), orElse: () => '');
+    if (existing.isEmpty) await DBHelper.instance.addVendorPlace(name);
+    if (mounted) Navigator.pop(context, existing.isEmpty ? name : existing);
+  }
+
+  Future<void> _deletePlace(String place) async {
+    if (widget.placesInUse.contains(place.toLowerCase())) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('"$place" is used by one or more vendors — change their place first.')));
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete "$place"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await DBHelper.instance.deleteVendorPlace(place);
+    if (mounted) setState(() => _places.remove(place));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = _places.where((p) => p.toLowerCase().contains(_query.toLowerCase())).toList();
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.7,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: TextField(
+                decoration: const InputDecoration(
+                  hintText: 'Search places',
+                  prefixIcon: Icon(Icons.search),
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (v) => setState(() => _query = v.trim()),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add_location_alt_outlined, color: AppTheme.primary),
+              title: Text(_query.isEmpty ? 'Add new place' : 'Add "$_query" as a new place',
+                  style: const TextStyle(color: AppTheme.primary, fontWeight: FontWeight.w600)),
+              onTap: _addPlace,
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: shown.isEmpty
+                  ? const Center(child: Text('No places yet — add one above'))
+                  : ListView.builder(
+                      itemCount: shown.length,
+                      itemBuilder: (context, i) {
+                        final p = shown[i];
+                        final selected = p.toLowerCase() == widget.current.toLowerCase();
+                        return ListTile(
+                          leading: Icon(selected ? Icons.check_circle : Icons.place_outlined,
+                              color: selected ? AppTheme.primary : Colors.black45),
+                          title: Text(p),
+                          trailing: UserRole.instance.isAdmin
+                              ? IconButton(
+                                  tooltip: 'Delete place',
+                                  icon: const Icon(Icons.delete_outline, size: 20),
+                                  onPressed: () => _deletePlace(p),
+                                )
+                              : null,
+                          onTap: () => Navigator.pop(context, p),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import '../utils/formatters.dart';
 import '../utils/app_logo.dart';
 import '../utils/app_info.dart';
 import '../utils/app_strings.dart';
+import '../utils/chart_style.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -611,6 +612,7 @@ class _TrendChart extends StatelessWidget {
     }
     return LineChart(
       LineChartData(
+        lineTouchData: ChartStyle.lineTouch([for (final d in data) d[dateKey] as String? ?? '']),
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,
@@ -762,6 +764,7 @@ class _PaymentMixChart extends StatelessWidget {
         Expanded(
           child: BarChart(
             BarChartData(
+              barTouchData: ChartStyle.barTouch([for (final t in _order) _labels[t] ?? t]),
               maxY: maxValue == 0 ? 1 : maxValue * 1.25,
               barGroups: bars,
               gridData: const FlGridData(show: false),
