@@ -13,6 +13,7 @@ import '../utils/app_strings.dart';
 import 'sales_screen.dart';
 import 'vendors_screen.dart';
 import 'vendor_insights_screen.dart';
+import 'product_margins_screen.dart';
 import 'todays_collections_screen.dart';
 import 'data_sync_screen.dart';
 import 'suppliers_screen.dart';
@@ -715,6 +716,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const VendorInsightsScreen()));
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.percent, color: AppTheme.profit, size: 18),
+              title: const Text('Profit Margins'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductMarginsScreen()));
               },
             ),
             ListTile(

@@ -52,7 +52,7 @@ Future<void> _initializeAndRun() async {
     // onError catches everything else — async code running outside that
     // framework's error zone, which FlutterError.onError alone would miss.
     FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
-    PlatformDispatcher.instance.onError = (error, stack) {
+    WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
       FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
       return true;
     };

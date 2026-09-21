@@ -507,6 +507,24 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   double get _discount => double.tryParse(_discountCtrl.text) ?? 0;
   double get _total => _subtotal - _discount;
 
+  /// Total cost of everything in the cart, at current quantities —
+  /// doesn't change with the discount, since discount only affects what
+  /// the customer pays, not what the goods cost.
+  double get _totalCost =>
+      _cart.fold(0, (sum, l) => sum + l.quantity * ((l.product['cost_price'] as num?)?.toDouble() ?? 0));
+
+  /// True if any line in the cart has no cost price on file (0 or
+  /// missing) — the margin numbers below would understate cost and
+  /// overstate profit for that product, so this is surfaced rather than
+  /// silently shown as a normal, trustworthy margin.
+  bool get _hasIncompleteCostData =>
+      _cart.any((l) => ((l.product['cost_price'] as num?)?.toDouble() ?? 0) <= 0);
+
+  double get _profitBeforeDiscount => _subtotal - _totalCost;
+  double get _profitAfterDiscount => _total - _totalCost;
+  double get _marginBeforeDiscount => _subtotal <= 0 ? 0 : (_profitBeforeDiscount / _subtotal) * 100;
+  double get _marginAfterDiscount => _total <= 0 ? 0 : (_profitAfterDiscount / _total) * 100;
+
   void _addProduct(Map<String, dynamic> product) {
     final existing = _cart.where((l) => l.product['id'] == product['id']);
     if (existing.isNotEmpty) {
@@ -641,6 +659,69 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     }
 
     if (mounted) Navigator.pop(context, true);
+  }
+
+  /// Shows the profit margin before and after the current discount, so
+  /// the effect of a discount on actual profit — not just on the total
+  /// charged — is visible while you're still deciding on it, not only
+  /// afterward in Reports.
+  Widget _buildMarginStrip() {
+    final before = _marginBeforeDiscount;
+    final after = _marginAfterDiscount;
+    Color colorFor(double margin) {
+      if (margin < 0) return AppTheme.danger;
+      if (margin < 15) return Colors.orange;
+      return AppTheme.profit;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colorFor(after).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Text('${before.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 13.5, color: colorFor(before))),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6),
+                    child: Icon(Icons.arrow_forward, size: 14, color: Colors.black45),
+                  ),
+                  Text('${after.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15, color: colorFor(after))),
+                ],
+              ),
+              Text('${AppStrings.t('profit')}: ${formatCurrency(_profitAfterDiscount)}',
+                  style: TextStyle(fontSize: 12.5, color: colorFor(after), fontWeight: FontWeight.w600)),
+            ],
+          ),
+          Text('Margin before → after discount', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+          if (after < 0)
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Text('Selling below cost on this sale',
+                  style: TextStyle(fontSize: 11.5, color: AppTheme.danger, fontWeight: FontWeight.w600)),
+            ),
+          if (_hasIncompleteCostData)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'One or more items have no cost price on file — this margin is likely higher than real',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -814,6 +895,10 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                       ),
                     ],
                   ),
+                  if (_cart.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    _buildMarginStrip(),
+                  ],
                   const SizedBox(height: 8),
                   Text('${AppStrings.t('total')}: ${formatCurrency(_total)}',
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
