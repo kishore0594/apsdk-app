@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../db/db_helper.dart';
 import '../utils/app_theme.dart';
+import '../utils/keyed_stream.dart';
 
 class ManageUsersScreen extends StatefulWidget {
   const ManageUsersScreen({super.key});
@@ -10,6 +11,7 @@ class ManageUsersScreen extends StatefulWidget {
 }
 
 class _ManageUsersScreenState extends State<ManageUsersScreen> {
+  final _usersStream = KeyedStream<List<Map<String, dynamic>>>();
   final _db = DBHelper.instance;
 
   Future<void> _changeRole(Map<String, dynamic> user) async {
@@ -50,7 +52,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
       backgroundColor: AppTheme.scaffold,
       appBar: AppBar(title: const Text('Manage Users')),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _db.watchUserRoles(),
+        stream: _usersStream.get(0, () => _db.watchUserRoles()),
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final users = snapshot.data!;

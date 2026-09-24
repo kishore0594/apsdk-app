@@ -4,6 +4,7 @@ import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
 import '../utils/user_role.dart';
+import '../utils/keyed_stream.dart';
 
 class SuppliersScreen extends StatefulWidget {
   const SuppliersScreen({super.key});
@@ -13,6 +14,7 @@ class SuppliersScreen extends StatefulWidget {
 }
 
 class _SuppliersScreenState extends State<SuppliersScreen> {
+  final _suppliersStream = KeyedStream<List<Map<String, dynamic>>>();
   final _db = DBHelper.instance;
   // Same double-submission guard as the Vendors quick-payment button.
   final Set<String> _busySupplierIds = {};
@@ -172,7 +174,7 @@ class _SuppliersScreenState extends State<SuppliersScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(AppStrings.t('suppliers_title'))),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _db.watchSuppliers(),
+        stream: _suppliersStream.get(0, () => _db.watchSuppliers()),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text("${AppStrings.t('could_not_load_suppliers')}: ${snapshot.error}"));
@@ -355,6 +357,8 @@ class SupplierDetailScreen extends StatefulWidget {
 }
 
 class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
+  final _supplierStream = KeyedStream<Map<String, dynamic>?>();
+  final _supplierTxnStream = KeyedStream<List<Map<String, dynamic>>>();
   final _db = DBHelper.instance;
   bool _saving = false;
 
@@ -425,7 +429,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.supplier['name'] as String)),
       body: StreamBuilder<Map<String, dynamic>?>(
-        stream: _db.watchSupplier(supplierId),
+        stream: _supplierStream.get(supplierId, () => _db.watchSupplier(supplierId)),
         builder: (context, supplierSnap) {
           final supplier = supplierSnap.data ?? widget.supplier;
           final balance = (supplier['balance'] as num?)?.toDouble() ?? 0;
@@ -488,7 +492,7 @@ class _SupplierDetailScreenState extends State<SupplierDetailScreen> {
               ),
               Expanded(
                 child: StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: _db.watchSupplierTransactions(supplierId),
+                  stream: _supplierTxnStream.get(supplierId, () => _db.watchSupplierTransactions(supplierId)),
                   builder: (context, txnSnap) {
                     if (txnSnap.hasError) {
                       return Center(child: Text("${AppStrings.t('could_not_load_history')}: ${txnSnap.error}"));

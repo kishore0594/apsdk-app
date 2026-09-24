@@ -6,6 +6,7 @@ import '../utils/app_theme.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_info.dart';
 import '../utils/user_role.dart';
+import '../utils/keyed_stream.dart';
 
 class VendorsScreen extends StatefulWidget {
   const VendorsScreen({super.key});
@@ -15,6 +16,10 @@ class VendorsScreen extends StatefulWidget {
 }
 
 class _VendorsScreenState extends State<VendorsScreen> {
+  Future<void> _addVendor() async {
+    await showAddVendorDialog(context);
+  }
+
   final _db = DBHelper.instance;
   // Tracks which vendor(s) currently have a quick-payment save in flight,
   // so double-tapping "Payment" on the same vendor while it's still
@@ -23,17 +28,50 @@ class _VendorsScreenState extends State<VendorsScreen> {
   final Set<String> _busyVendorIds = {};
   String _searchQuery = '';
   late Future<Map<String, dynamic>> _insightsFuture;
+  // Created once, not on every redraw — re-creating it re-queried the
+  // database and caused flicker, especially online.
+  late final Stream<List<Map<String, dynamic>>> _vendorsStream = _db.watchVendors();
+  // Last successful summary. Shown while a refresh is running (or if one
+  // fails), so Average Days / Needs Attention never blank out.
+  Map<String, dynamic>? _lastInsights;
+  // Balances the current summary was computed from; when any vendor's
+  // balance changes, the summary recalculates automatically.
+  String? _insightsSignature;
 
   @override
   void initState() {
     super.initState();
-    _insightsFuture = _db.getVendorInsightsSummary();
+    _insightsFuture = _trackInsights(_db.getVendorInsightsSummary());
+  }
+
+  Future<Map<String, dynamic>> _trackInsights(Future<Map<String, dynamic>> f) {
+    return f.then((v) {
+      if (mounted) setState(() => _lastInsights = v);
+      return v;
+    });
   }
 
   Future<void> _refreshInsights() async {
-    final future = _db.getVendorInsightsSummary();
+    final future = _trackInsights(_db.getVendorInsightsSummary());
     setState(() => _insightsFuture = future);
-    await future;
+    try {
+      await future;
+    } catch (_) {
+      // Keep showing the last good summary.
+    }
+  }
+
+  void _refreshInsightsIfChanged(List<Map<String, dynamic>> vendors) {
+    final sig = vendors.map((v) => '${v['id']}:${v['balance']}').join('|');
+    if (_insightsSignature == null) {
+      _insightsSignature = sig; // first load already started in initState
+      return;
+    }
+    if (sig == _insightsSignature) return;
+    _insightsSignature = sig;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _refreshInsights();
+    });
   }
 
   List<Map<String, dynamic>> _filteredVendors(List<Map<String, dynamic>> vendors) {
@@ -78,197 +116,10 @@ class _VendorsScreenState extends State<VendorsScreen> {
     return '$phone • $place';
   }
 
-  /// Existing values for one field (name/phone/address) across all current
-  /// vendors — the suggestion source for _suggestField, so retyping "same
-  /// place, different spelling" becomes picking from a list instead.
-  List<String> _distinctValues(List<Map<String, dynamic>> vendors, String key) {
-    return vendors
-        .map((v) => (v[key] as String? ?? '').trim())
-        .where((v) => v.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-  }
 
-  /// A text field that suggests existing values as you type. Uses the same
-  /// controller-capture approach as the product search in New Sale — the
-  /// captured controller is read directly when Save is pressed, rather
-  /// than kept in sync via a listener (which Autocomplete's rebuild
-  /// behavior can call repeatedly, risking duplicate listener registrations).
-  Widget _suggestField({
-    required String label,
-    required String initialValue,
-    required List<String> suggestions,
-    required void Function(TextEditingController) captureController,
-  }) {
-    return LayoutBuilder(
-      builder: (context, constraints) => Autocomplete<String>(
-        initialValue: TextEditingValue(text: initialValue),
-        optionsBuilder: (value) {
-          final q = value.text.trim().toLowerCase();
-          if (q.isEmpty) return const Iterable<String>.empty();
-          return suggestions.where((s) => s.toLowerCase().contains(q) && s.toLowerCase() != q);
-        },
-        fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-          captureController(controller);
-          return TextField(controller: controller, focusNode: focusNode, decoration: InputDecoration(labelText: label));
-        },
-        optionsViewBuilder: (context, onSelected, options) => Align(
-          alignment: Alignment.topLeft,
-          child: Material(
-            elevation: 4,
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              width: constraints.maxWidth,
-              height: options.length > 3 ? 168 : options.length * 44.0,
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                itemCount: options.length,
-                itemBuilder: (context, i) {
-                  final s = options.elementAt(i);
-                  return ListTile(
-                    dense: true,
-                    title: Text(s, style: const TextStyle(fontSize: 13)),
-                    onTap: () => onSelected(s),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
-  Future<String?> _pickPlace(String current) async {
-    final places = await _db.getVendorPlaces();
-    final vendors = await _db.getVendors();
-    final inUse = vendors.map((v) => (v['address'] as String? ?? '').trim().toLowerCase()).toSet();
-    if (!mounted) return null;
-    return showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _PlacePickerSheet(places: places, current: current, placesInUse: inUse),
-    );
-  }
 
-  /// Looks like a dropdown field; tapping it opens the places list.
-  Widget _placeField(String place, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: AppStrings.t('place'),
-          suffixIcon: const Icon(Icons.arrow_drop_down),
-        ),
-        child: Text(
-          place.isEmpty ? 'Select place' : place,
-          style: TextStyle(color: place.isEmpty ? Colors.black45 : null),
-        ),
-      ),
-    );
-  }
 
-  Future<void> _addVendor() async {
-    final allVendors = await _db.getVendors();
-    final nameSuggestions = _distinctValues(allVendors, 'name');
-    final phoneSuggestions = _distinctValues(allVendors, 'phone');
-    TextEditingController? nameFieldCtrl;
-    TextEditingController? phoneFieldCtrl;
-    String place = '';
-    final openingCtrl = TextEditingController(text: '0');
-    DateTime creditDate = DateTime.now();
-
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(AppStrings.t('add_vendor_credit_customer')),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _suggestField(
-                  label: AppStrings.t('name'),
-                  initialValue: '',
-                  suggestions: nameSuggestions,
-                  captureController: (c) => nameFieldCtrl = c,
-                ),
-                const SizedBox(height: 8),
-                _suggestField(
-                  label: AppStrings.t('phone'),
-                  initialValue: '',
-                  suggestions: phoneSuggestions,
-                  captureController: (c) => phoneFieldCtrl = c,
-                ),
-                const SizedBox(height: 8),
-                _placeField(place, () async {
-                  final picked = await _pickPlace(place);
-                  if (picked != null) setDialogState(() => place = picked);
-                }),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: openingCtrl,
-                  decoration: InputDecoration(labelText: AppStrings.t('opening_balance_owed')),
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 8),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(AppStrings.t('credit_given_on'), style: const TextStyle(fontSize: 13)),
-                  subtitle: Text(formatDay(creditDate.toIso8601String())),
-                  trailing: const Icon(Icons.calendar_today, size: 18),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: creditDate,
-                      firstDate: DateTime(2015),
-                      lastDate: DateTime.now(),
-                    );
-                    if (picked != null) setDialogState(() => creditDate = picked);
-                  },
-                ),
-                const Text(
-                  'Only matters if there\'s an opening balance — sets when that old credit '
-                  'actually started, so day-tracking is accurate from the start.',
-                  style: TextStyle(fontSize: 11, color: Colors.black54),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
-          ],
-        ),
-      ),
-    );
-
-    final vendorName = nameFieldCtrl?.text.trim() ?? '';
-    if (saved == true && vendorName.isNotEmpty) {
-      final newVendorId = await _db.insertVendor({
-        'name': vendorName,
-        'phone': phoneFieldCtrl?.text.trim() ?? '',
-        'address': place,
-        'opening_balance': 0,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-      final openingAmount = double.tryParse(openingCtrl.text) ?? 0;
-      if (openingAmount > 0) {
-        await _db.addCreditTransaction(
-          vendorId: newVendorId,
-          type: 'CREDIT',
-          amount: openingAmount,
-          notes: 'Opening balance',
-          date: creditDate.toIso8601String(),
-        );
-      }
-      // No manual refresh needed — the list below is a live stream, so it
-      // (and the phone this vendor was added on, even if it was offline a
-      // moment ago) updates on its own the instant this write lands.
-    }
-  }
 
   Future<void> _quickCollectPayment(String vendorId, String vendorName) async {
     if (_busyVendorIds.contains(vendorId)) return;
@@ -338,7 +189,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
               ),
               const SizedBox(height: 8),
               _placeField(place, () async {
-                final picked = await _pickPlace(place);
+                final picked = await _pickPlace(context, place);
                 if (picked != null) setDialogState(() => place = picked);
               }),
             ],
@@ -472,7 +323,15 @@ class _VendorsScreenState extends State<VendorsScreen> {
     final url = Uri.parse('https://wa.me/$digits?text=$message');
     try {
       final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
-      if (!launched && mounted) {
+      if (launched) {
+        // Counted when WhatsApp actually opened with the reminder.
+        await _db.logReminder(
+          vendorId: v['id'] as String,
+          balance: balance,
+          daysOutstanding: days,
+          language: language,
+        );
+      } else if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Could not open WhatsApp')));
       }
@@ -535,6 +394,24 @@ class _VendorsScreenState extends State<VendorsScreen> {
                           child: Text(daysText,
                               style: const TextStyle(
                                   fontSize: 11.5, color: AppTheme.danger, fontWeight: FontWeight.w600)),
+                        ),
+                      if (((v['reminder_count'] as num?)?.toInt() ?? 0) > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.notifications_active_outlined, size: 12, color: Color(0xFF128C7E)),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  'Reminded ${(v['reminder_count'] as num).toInt()}×'
+                                  '${v['last_reminder_at'] is String ? ' · last ${formatDay(v['last_reminder_at'] as String)}' : ''}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF128C7E)),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                     ],
                   ),
@@ -871,7 +748,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
             IconButton(
               tooltip: 'Manage places',
               icon: const Icon(Icons.edit_location_alt_outlined),
-              onPressed: () => _pickPlace(''),
+              onPressed: () => _pickPlace(context, ''),
             ),
           IconButton(
             tooltip: 'What do these mean?',
@@ -881,7 +758,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
         ],
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _db.watchVendors(),
+        stream: _vendorsStream,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return ErrorState(message: 'Could not load vendors.\n${snapshot.error}');
@@ -890,6 +767,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           final vendors = snapshot.data!;
+          _refreshInsightsIfChanged(vendors);
           final totalOutstanding = vendors.fold<double>(
               0, (sum, v) => sum + ((v['balance'] as num?)?.toDouble() ?? 0));
           final owingCount = vendors.where((v) => ((v['balance'] as num?)?.toDouble() ?? 0) > 0).length;
@@ -934,7 +812,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
                       : FutureBuilder<Map<String, dynamic>>(
                           future: _insightsFuture,
                           builder: (context, insightsSnapshot) {
-                            final insights = insightsSnapshot.data;
+                            final insights = insightsSnapshot.data ?? _lastInsights;
                             final trends = (insights?['trends'] as Map<String, dynamic>?) ?? {};
                             final needsAttention =
                                 (insights?['needs_attention'] as List<Map<String, dynamic>>?) ?? [];
@@ -992,6 +870,9 @@ class VendorDetailScreen extends StatefulWidget {
 }
 
 class _VendorDetailScreenState extends State<VendorDetailScreen> {
+  final _vendorStream = KeyedStream<Map<String, dynamic>?>();
+  final _vendorTxnStream = KeyedStream<List<Map<String, dynamic>>>();
+  final _reminderStream = KeyedStream<List<Map<String, dynamic>>>();
   final _db = DBHelper.instance;
   bool _saving = false;
   late Future<int?> _daysOutstandingFuture;
@@ -1094,7 +975,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.vendor['name'] as String)),
       body: StreamBuilder<Map<String, dynamic>?>(
-        stream: _db.watchVendor(vendorId),
+        stream: _vendorStream.get(vendorId, () => _db.watchVendor(vendorId)),
         builder: (context, vendorSnap) {
           // Fall back to the vendor map we were opened with until the
           // live one arrives, so the screen never looks empty.
@@ -1177,6 +1058,46 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
                   ),
                 ),
               const Divider(height: 1),
+              // WhatsApp reminder history — collapsed by default so the
+              // transaction history below keeps its space.
+              StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _reminderStream.get(vendorId, () => _db.watchVendorReminders(vendorId)),
+                builder: (context, remSnap) {
+                  final reminders = remSnap.data ?? const <Map<String, dynamic>>[];
+                  if (reminders.isEmpty) return const SizedBox.shrink();
+                  return Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      leading: const Icon(Icons.notifications_active_outlined, color: Color(0xFF128C7E)),
+                      title: Text('WhatsApp reminders sent: ${reminders.length}',
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                      subtitle: Text('Last: ${formatDay(reminders.first['date'] as String)}',
+                          style: const TextStyle(fontSize: 11.5)),
+                      children: [
+                        SizedBox(
+                          height: reminders.length > 4 ? 200 : reminders.length * 50.0,
+                          child: ListView.builder(
+                            itemCount: reminders.length,
+                            itemBuilder: (context, i) {
+                              final r = reminders[i];
+                              final days = (r['days_outstanding'] as num?)?.toInt();
+                              return ListTile(
+                                dense: true,
+                                title: Text(formatDay(r['date'] as String)),
+                                subtitle: Text(
+                                    '${formatCurrency((r['balance'] as num?)?.toDouble() ?? 0)} due'
+                                    '${days != null ? ' · $days days pending' : ''}'),
+                                trailing: Text(r['language'] == 'ta' ? 'தமிழ்' : 'English',
+                                    style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Align(
@@ -1186,7 +1107,7 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
               ),
               Expanded(
                 child: StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: _db.watchVendorTransactions(vendorId),
+                  stream: _vendorTxnStream.get(vendorId, () => _db.watchVendorTransactions(vendorId)),
                   builder: (context, txnSnap) {
                     if (txnSnap.hasError) {
                       return Center(child: Text("${AppStrings.t('could_not_load_history')}: ${txnSnap.error}"));
@@ -1402,4 +1323,200 @@ class _PlacePickerSheetState extends State<_PlacePickerSheet> {
       ),
     );
   }
+}
+
+// ---------- Shared vendor form helpers (used by Vendors and New Sale) ----------
+
+/// Existing values for one field (name/phone/address) across all current
+/// vendors — the suggestion source for _suggestField, so retyping "same
+/// place, different spelling" becomes picking from a list instead.
+List<String> _distinctValues(List<Map<String, dynamic>> vendors, String key) {
+  return vendors
+      .map((v) => (v[key] as String? ?? '').trim())
+      .where((v) => v.isNotEmpty)
+      .toSet()
+      .toList()
+    ..sort();
+}
+
+/// A text field that suggests existing values as you type. Uses the same
+/// controller-capture approach as the product search in New Sale — the
+/// captured controller is read directly when Save is pressed, rather
+/// than kept in sync via a listener (which Autocomplete's rebuild
+/// behavior can call repeatedly, risking duplicate listener registrations).
+Widget _suggestField({
+  required String label,
+  required String initialValue,
+  required List<String> suggestions,
+  required void Function(TextEditingController) captureController,
+}) {
+  return LayoutBuilder(
+    builder: (context, constraints) => Autocomplete<String>(
+      initialValue: TextEditingValue(text: initialValue),
+      optionsBuilder: (value) {
+        final q = value.text.trim().toLowerCase();
+        if (q.isEmpty) return const Iterable<String>.empty();
+        return suggestions.where((s) => s.toLowerCase().contains(q) && s.toLowerCase() != q);
+      },
+      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+        captureController(controller);
+        return TextField(controller: controller, focusNode: focusNode, decoration: InputDecoration(labelText: label));
+      },
+      optionsViewBuilder: (context, onSelected, options) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: constraints.maxWidth,
+            height: options.length > 3 ? 168 : options.length * 44.0,
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: options.length,
+              itemBuilder: (context, i) {
+                final s = options.elementAt(i);
+                return ListTile(
+                  dense: true,
+                  title: Text(s, style: const TextStyle(fontSize: 13)),
+                  onTap: () => onSelected(s),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<String?> _pickPlace(BuildContext context, String current) async {
+  final places = await DBHelper.instance.getVendorPlaces();
+  final vendors = await DBHelper.instance.getVendors();
+  final inUse = vendors.map((v) => (v['address'] as String? ?? '').trim().toLowerCase()).toSet();
+  if (!context.mounted) return null;
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => _PlacePickerSheet(places: places, current: current, placesInUse: inUse),
+  );
+}
+
+/// Looks like a dropdown field; tapping it opens the places list.
+Widget _placeField(String place, VoidCallback onTap) {
+  return InkWell(
+    onTap: onTap,
+    child: InputDecorator(
+      decoration: InputDecoration(
+        labelText: AppStrings.t('place'),
+        suffixIcon: const Icon(Icons.arrow_drop_down),
+      ),
+      child: Text(
+        place.isEmpty ? 'Select place' : place,
+        style: TextStyle(color: place.isEmpty ? Colors.black45 : null),
+      ),
+    ),
+  );
+}
+
+/// The ONE Add Vendor form, used by both the Vendors screen and New Sale
+/// (so the two can never drift apart). Returns the new vendor's id, or
+/// null if cancelled.
+Future<String?> showAddVendorDialog(BuildContext context) async {
+  final allVendors = await DBHelper.instance.getVendors();
+  final nameSuggestions = _distinctValues(allVendors, 'name');
+  final phoneSuggestions = _distinctValues(allVendors, 'phone');
+  TextEditingController? nameFieldCtrl;
+  TextEditingController? phoneFieldCtrl;
+  String place = '';
+  final openingCtrl = TextEditingController(text: '0');
+  DateTime creditDate = DateTime.now();
+
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (_) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text(AppStrings.t('add_vendor_credit_customer')),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _suggestField(
+                label: AppStrings.t('name'),
+                initialValue: '',
+                suggestions: nameSuggestions,
+                captureController: (c) => nameFieldCtrl = c,
+              ),
+              const SizedBox(height: 8),
+              _suggestField(
+                label: AppStrings.t('phone'),
+                initialValue: '',
+                suggestions: phoneSuggestions,
+                captureController: (c) => phoneFieldCtrl = c,
+              ),
+              const SizedBox(height: 8),
+              _placeField(place, () async {
+                final picked = await _pickPlace(context, place);
+                if (picked != null) setDialogState(() => place = picked);
+              }),
+              const SizedBox(height: 8),
+              TextField(
+                controller: openingCtrl,
+                decoration: InputDecoration(labelText: AppStrings.t('opening_balance_owed')),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(AppStrings.t('credit_given_on'), style: const TextStyle(fontSize: 13)),
+                subtitle: Text(formatDay(creditDate.toIso8601String())),
+                trailing: const Icon(Icons.calendar_today, size: 18),
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: creditDate,
+                    firstDate: DateTime(2015),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) setDialogState(() => creditDate = picked);
+                },
+              ),
+              const Text(
+                'Only matters if there\'s an opening balance — sets when that old credit '
+                'actually started, so day-tracking is accurate from the start.',
+                style: TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
+        ],
+      ),
+    ),
+  );
+
+  final vendorName = nameFieldCtrl?.text.trim() ?? '';
+  if (saved == true && vendorName.isNotEmpty) {
+    final newVendorId = await DBHelper.instance.insertVendor({
+      'name': vendorName,
+      'phone': phoneFieldCtrl?.text.trim() ?? '',
+      'address': place,
+      'opening_balance': 0,
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    final openingAmount = double.tryParse(openingCtrl.text) ?? 0;
+    if (openingAmount > 0) {
+      await DBHelper.instance.addCreditTransaction(
+        vendorId: newVendorId,
+        type: 'CREDIT',
+        amount: openingAmount,
+        notes: 'Opening balance',
+        date: creditDate.toIso8601String(),
+      );
+    }
+    return newVendorId;
+  }
+  return null;
 }

@@ -34,6 +34,57 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// - Firestore also has no case-insensitive query, so products/vendors/
 ///   suppliers each keep a name_lower field purely for case-insensitive
 ///   matching during CSV import.
+class _CreditLot {
+  final DateTime date;
+  double remaining;
+  _CreditLot(this.date, this.remaining);
+}
+
+/// Date of the OLDEST credit this vendor still hasn't paid off, or null
+/// if nothing is owed. Standard receivables aging (FIFO): every payment
+/// clears the oldest credit first.
+///
+/// Replaces the earlier rule, which only reset the age when the balance
+/// hit exactly zero — so partial payments never reduced "days
+/// outstanding", and the average stayed stuck even as vendors paid.
+/// One shared function used by the Vendors screen, Vendor Insights and
+/// the Dashboard, so they can never disagree.
+DateTime? oldestUnpaidCreditSince(List<Map<String, dynamic>> txns) {
+  final sorted = [...txns]
+    ..sort((a, b) => (a['date'] as String? ?? '').compareTo(b['date'] as String? ?? ''));
+  final lots = <_CreditLot>[];
+  double advance = 0; // paid before the credit existed (overpayment)
+  for (final t in sorted) {
+    final amount = (t['amount'] as num?)?.toDouble() ?? 0;
+    if (amount <= 0) continue;
+    if (t['type'] == 'CREDIT') {
+      var remaining = amount;
+      if (advance > 0) {
+        final used = advance < remaining ? advance : remaining;
+        remaining -= used;
+        advance -= used;
+      }
+      final date = DateTime.tryParse(t['date'] as String? ?? '');
+      if (remaining > 0.005 && date != null) lots.add(_CreditLot(date, remaining));
+    } else {
+      // PAYMENT and ADJUSTMENT both reduce what's owed, oldest first.
+      var pay = amount;
+      while (pay > 0.005 && lots.isNotEmpty) {
+        final lot = lots.first;
+        if (lot.remaining <= pay + 0.005) {
+          pay -= lot.remaining;
+          lots.removeAt(0);
+        } else {
+          lot.remaining -= pay;
+          pay = 0;
+        }
+      }
+      if (pay > 0.005) advance += pay;
+    }
+  }
+  return lots.isEmpty ? null : lots.first.date;
+}
+
 class DBHelper {
   DBHelper._internal();
   static final DBHelper instance = DBHelper._internal();
@@ -71,6 +122,7 @@ class DBHelper {
   CollectionReference get _stockMovements => _fs.collection('stock_movements');
   CollectionReference get _expenses => _fs.collection('expenses');
   CollectionReference get _vendorPlaces => _fs.collection('vendor_places');
+  CollectionReference get _reminders => _fs.collection('reminders');
 
   Map<String, dynamic> _withId(DocumentSnapshot doc) {
     final data = (doc.data() as Map<String, dynamic>?) ?? {};
@@ -195,7 +247,7 @@ class DBHelper {
     final now = DateTime.now().toIso8601String();
 
     final batch = _fs.batch();
-    batch.update(productRef, {'quantity': updated, 'updated_at': now});
+    batch.update(productRef, {'quantity': FieldValue.increment(deltaQty), 'updated_at': now});
     batch.set(_stockMovements.doc(), {
       'product_id': productId,
       'product_name': data['name'],
@@ -305,7 +357,7 @@ class DBHelper {
       'balance_after': newBalance,
       'notes': notes,
     });
-    batch.update(supplierRef, {'balance': newBalance});
+    batch.update(supplierRef, {'balance': FieldValue.increment(newBalance - current)});
     await _write(batch.commit());
   }
 
@@ -363,7 +415,7 @@ class DBHelper {
       'balance_after': newBalance,
       'notes': notes,
     });
-    batch.update(supplierRef, {'balance': newBalance});
+    batch.update(supplierRef, {'balance': FieldValue.increment(newBalance - currentBalance)});
 
     for (final item in items) {
       final qty = (item['quantity'] as num).toDouble();
@@ -381,7 +433,7 @@ class DBHelper {
       if (pid != null && productRefs.containsKey(pid)) {
         final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
         batch.update(productRefs[pid]!, {
-          'quantity': current + qty,
+          'quantity': FieldValue.increment(qty),
           'cost_price': cost,
           'updated_at': now,
         });
@@ -418,6 +470,70 @@ class DBHelper {
       'balance': (vendor['opening_balance'] as num?)?.toDouble() ?? 0,
     }));
     return ref.id;
+  }
+
+  /// Recomputes every vendor's balance from their full transaction
+  /// history and fixes any that disagree. Needed once for data written
+  /// before balances switched to increments — back then, two phones
+  /// editing the same vendor offline could overwrite each other.
+  /// Returns the vendors that were corrected (name, old, new).
+  Future<List<Map<String, dynamic>>> recheckVendorBalances() async {
+    final vendors = await getVendors();
+    final byVendor = <String, double>{};
+    for (final t in _fromSnapshot(await _creditTxns.get())) {
+      final id = t['vendor_id'] as String?;
+      if (id == null) continue;
+      final amount = (t['amount'] as num?)?.toDouble() ?? 0;
+      byVendor[id] = (byVendor[id] ?? 0) + (t['type'] == 'CREDIT' ? amount : -amount);
+    }
+    final fixed = <Map<String, dynamic>>[];
+    final batch = _fs.batch();
+    for (final v in vendors) {
+      final id = v['id'] as String;
+      final stored = (v['balance'] as num?)?.toDouble() ?? 0;
+      final opening = (v['opening_balance'] as num?)?.toDouble() ?? 0;
+      final actual = double.parse((opening + (byVendor[id] ?? 0)).toStringAsFixed(2));
+      if ((stored - actual).abs() > 0.01) {
+        batch.update(_vendors.doc(id), {'balance': actual});
+        fixed.add({'name': v['name'], 'old': stored, 'new': actual});
+      }
+    }
+    if (fixed.isNotEmpty) await _write(batch.commit());
+    return fixed;
+  }
+
+  // ---------------- WHATSAPP REMINDERS ----------------
+  /// Records one payment reminder sent to a vendor: a history entry plus
+  /// a running count on the vendor itself (so the vendor list can show
+  /// "Reminded 3x" without extra lookups). One batch, works offline.
+  Future<void> logReminder({
+    required String vendorId,
+    required double balance,
+    int? daysOutstanding,
+    required String language,
+  }) async {
+    final now = DateTime.now().toIso8601String();
+    final batch = _fs.batch();
+    batch.set(_reminders.doc(), {
+      'vendor_id': vendorId,
+      'date': now,
+      'balance': balance,
+      'days_outstanding': daysOutstanding,
+      'language': language,
+    });
+    batch.update(_vendors.doc(vendorId), {
+      'reminder_count': FieldValue.increment(1),
+      'last_reminder_at': now,
+    });
+    await _write(batch.commit());
+  }
+
+  Stream<List<Map<String, dynamic>>> watchVendorReminders(String vendorId) {
+    return _reminders.where('vendor_id', isEqualTo: vendorId).snapshots().map((snap) {
+      final list = _fromSnapshot(snap);
+      list.sort((a, b) => (b['date'] as String).compareTo(a['date'] as String));
+      return list;
+    });
   }
 
   // ---------------- VENDOR PLACES ----------------
@@ -536,7 +652,7 @@ class DBHelper {
       'notes': notes,
       'sale_id': saleId,
     });
-    batch.update(vendorRef, {'balance': newBalance});
+    batch.update(vendorRef, {'balance': FieldValue.increment(newBalance - current)});
     await _write(batch.commit());
   }
 
@@ -650,21 +766,9 @@ class DBHelper {
     final txns = _fromSnapshot(snap);
     txns.sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
-    double runningBalance = 0;
-    DateTime? openedSince;
-
-    for (final t in txns) {
-      final amount = (t['amount'] as num).toDouble();
-      runningBalance = t['type'] == 'CREDIT' ? runningBalance + amount : runningBalance - amount;
-      if (runningBalance <= 0) {
-        openedSince = null;
-      } else if (openedSince == null) {
-        openedSince = DateTime.tryParse(t['date'] as String);
-      }
-    }
-
-    if (runningBalance <= 0 || openedSince == null) return null;
-    return DateTime.now().difference(openedSince).inDays;
+    final since = oldestUnpaidCreditSince(txns);
+    if (since == null) return null;
+    return DateTime.now().difference(since).inDays;
   }
 
   /// Vendors whose current outstanding balance has been unpaid for at
@@ -695,6 +799,12 @@ class DBHelper {
   Future<List<Map<String, dynamic>>> getVendorAnalytics() async {
     final vendors = await getVendors();
     final salesSnap = await _sales.get();
+    // All vendors' transactions in one query (was two queries per vendor).
+    final analyticsTxns = <String, List<Map<String, dynamic>>>{};
+    for (final t in _fromSnapshot(await _creditTxns.get())) {
+      final id = t['vendor_id'] as String?;
+      if (id != null) analyticsTxns.putIfAbsent(id, () => []).add(t);
+    }
 
     final purchaseCount = <String, int>{};
     final lastPurchase = <String, String>{};
@@ -714,7 +824,8 @@ class DBHelper {
     for (final v in vendors) {
       final vid = v['id'] as String;
       final balance = (v['balance'] as num?)?.toDouble() ?? 0;
-      final daysOutstanding = balance > 0 ? await getVendorOutstandingDays(vid) : null;
+      final since = balance > 0 ? oldestUnpaidCreditSince(analyticsTxns[vid] ?? const []) : null;
+      final daysOutstanding = since == null ? null : DateTime.now().difference(since).inDays;
       result.add({
         ...v,
         'balance': balance,
@@ -782,6 +893,16 @@ class DBHelper {
     final needsAttention = <Map<String, dynamic>>[];
     final trends = <String, double>{};
 
+    // ONE query for every vendor's transactions, grouped in memory. The
+    // old per-vendor query loop was instant offline (local copy) but, with
+    // many vendors, very slow online — the summary section stayed blank
+    // while it loaded, which is the "disappears online" glitch.
+    final txnsByVendor = <String, List<Map<String, dynamic>>>{};
+    for (final t in _fromSnapshot(await _creditTxns.get())) {
+      final id = t['vendor_id'] as String?;
+      if (id != null) txnsByVendor.putIfAbsent(id, () => []).add(t);
+    }
+
     for (final v in vendors) {
       final createdAt = v['created_at'] as String?;
       if (createdAt != null && createdAt.compareTo(monthStart) >= 0) newThisMonth++;
@@ -789,32 +910,19 @@ class DBHelper {
       final vendorId = v['id'] as String;
       final balance = (v['balance'] as num?)?.toDouble() ?? 0;
 
-      // Sorted client-side (ascending, oldest first) — see getStockHistory
-      // for why the query itself has no orderBy.
-      final snap = await _creditTxns.where('vendor_id', isEqualTo: vendorId).get();
-      final txns = _fromSnapshot(snap)..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
+      final txns = [...(txnsByVendor[vendorId] ?? const <Map<String, dynamic>>[])]
+        ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
       if (balance <= 0) continue;
 
-      // Same days-outstanding algorithm as getVendorOutstandingDays,
-      // computed here inline so the transaction history fetched above
-      // isn't queried a second time.
-      double runningBalance = 0;
-      DateTime? openedSince;
       String? lastActivity;
       for (final t in txns) {
         final date = t['date'] as String;
-        final amount = (t['amount'] as num).toDouble();
-        runningBalance = t['type'] == 'CREDIT' ? runningBalance + amount : runningBalance - amount;
-        if (runningBalance <= 0) {
-          openedSince = null;
-        } else if (openedSince == null) {
-          openedSince = DateTime.tryParse(date);
-        }
         if (lastActivity == null || date.compareTo(lastActivity) > 0) lastActivity = date;
       }
-      if (runningBalance <= 0 || openedSince == null) continue;
-      final daysOut = now.difference(openedSince).inDays;
+      final since = oldestUnpaidCreditSince(txns);
+      if (since == null) continue;
+      final daysOut = now.difference(since).inDays;
       daysOutstandingList.add(daysOut);
 
       double netChange = 0;
@@ -1051,7 +1159,7 @@ class DBHelper {
       if (pid != null && productRefs.containsKey(pid)) {
         final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
         batch.update(productRefs[pid]!, {
-          'quantity': current - qty,
+          'quantity': FieldValue.increment(-qty),
           'updated_at': now,
         });
         batch.set(_stockMovements.doc(), {
@@ -1082,7 +1190,7 @@ class DBHelper {
           'notes': 'Credit sale #${saleRef.id}',
           'sale_id': saleRef.id,
         });
-        batch.update(vendorRef, {'balance': newBalance});
+        batch.update(vendorRef, {'balance': FieldValue.increment(newBalance - vendorCurrentBalance)});
       }
     }
 
@@ -1148,7 +1256,7 @@ class DBHelper {
       if (pid != null && productRefs.containsKey(pid)) {
         final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
         batch.update(productRefs[pid]!, {
-          'quantity': current + qty,
+          'quantity': FieldValue.increment(qty),
           'updated_at': now,
         });
         batch.set(_stockMovements.doc(), {
@@ -1171,7 +1279,7 @@ class DBHelper {
       final creditAmount = (creditData['amount'] as num).toDouble();
       final currentBalance = (vendorData['balance'] as num?)?.toDouble() ?? 0;
       final newBalance = currentBalance - creditAmount;
-      batch.update(vendorRef, {'balance': newBalance});
+      batch.update(vendorRef, {'balance': FieldValue.increment(newBalance - currentBalance)});
       batch.set(_creditTxns.doc(), {
         'vendor_id': vendorId,
         'vendor_name': vendorData['name'],

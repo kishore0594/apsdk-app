@@ -6,7 +6,9 @@ import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
 import '../utils/user_role.dart';
+import 'vendors_screen.dart';
 import '../utils/chart_style.dart';
+import '../utils/keyed_stream.dart';
 
 // Units sold by weight/volume need decimal quantities (e.g. 0.75 Kgs).
 // Count-based units (Nos, Box, Dozen, Packet...) stay whole numbers.
@@ -35,6 +37,7 @@ class SalesScreen extends StatefulWidget {
 }
 
 class _SalesScreenState extends State<SalesScreen> {
+  final _salesStream = KeyedStream<List<Map<String, dynamic>>>();
   final _db = DBHelper.instance;
   List<Map<String, dynamic>> _monthlyTrend = [];
   /// The single day being viewed (defaults to today); null = all sales.
@@ -322,8 +325,8 @@ class _SalesScreenState extends State<SalesScreen> {
         title: Text(AppStrings.t('sales_title')),
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _db.watchSales(
-            dateFilter: _day?.toIso8601String().substring(0, 10)),
+        stream: _salesStream.get(_day?.toIso8601String().substring(0, 10) ?? 'all',
+            () => _db.watchSales(dateFilter: _day?.toIso8601String().substring(0, 10))),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text("${AppStrings.t('could_not_load_sales')}: ${snapshot.error}"));
@@ -597,44 +600,17 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     }
   }
 
+  /// Same full Add Vendor form as the Vendors screen (place list,
+  /// opening balance, credit date) — one shared form, not a copy.
   Future<void> _quickAddVendor() async {
-    final nameCtrl = TextEditingController();
-    final phoneCtrl = TextEditingController();
-    final placeCtrl = TextEditingController();
-
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(AppStrings.t('add_vendor_credit_customer')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nameCtrl, decoration: InputDecoration(labelText: AppStrings.t('name')), autofocus: true),
-            TextField(controller: phoneCtrl, decoration: InputDecoration(labelText: AppStrings.t('phone'))),
-            TextField(controller: placeCtrl, decoration: InputDecoration(labelText: AppStrings.t('place'))),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('save'))),
-        ],
-      ),
-    );
-
-    if (saved == true && nameCtrl.text.trim().isNotEmpty) {
-      final newId = await _db.insertVendor({
-        'name': nameCtrl.text.trim(),
-        'phone': phoneCtrl.text.trim(),
-        'address': placeCtrl.text.trim(),
-        'opening_balance': 0,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-      final vendors = await _db.getVendors();
-      setState(() {
-        _vendors = vendors;
-        _vendorId = newId;
-      });
-    }
+    final newId = await showAddVendorDialog(context);
+    if (newId == null || !mounted) return;
+    final vendors = await _db.getVendors();
+    if (!mounted) return;
+    setState(() {
+      _vendors = vendors;
+      _vendorId = newId;
+    });
   }
 
   Future<void> _editQuantity(_CartLine line) async {

@@ -251,19 +251,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final vendorId = v['id'] as String;
       final txns = [...(txnsByVendor[vendorId] ?? [])]
         ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
-      double runningBalance = 0;
-      DateTime? openedSince;
-      for (final t in txns) {
-        final amount = (t['amount'] as num).toDouble();
-        runningBalance = t['type'] == 'CREDIT' ? runningBalance + amount : runningBalance - amount;
-        if (runningBalance <= 0) {
-          openedSince = null;
-        } else if (openedSince == null) {
-          openedSince = DateTime.tryParse(t['date'] as String);
-        }
-      }
-      if (runningBalance <= 0 || openedSince == null) continue;
-      final days = now.difference(openedSince).inDays;
+      final since = oldestUnpaidCreditSince(txns);
+      if (since == null) continue;
+      final days = now.difference(since).inDays;
       if (days >= 60) {
         agingVendors.add({...v, 'balance': balance, 'days_outstanding': days});
       }

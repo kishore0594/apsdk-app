@@ -28,8 +28,18 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final products = await _db.getProducts();
-    if (mounted) setState(() { _products = products; _loading = false; });
+    try {
+      final products = await _db.getProducts();
+      if (mounted) setState(() => _products = products);
+    } catch (e) {
+      // Keep whatever was shown before; never leave a spinner forever.
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not load products: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   double _costOf(Map<String, dynamic> p) => (p['cost_price'] as num?)?.toDouble() ?? 0;

@@ -8,6 +8,7 @@ import '../utils/csv_helper.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
 import '../utils/user_role.dart';
+import '../utils/formatters.dart';
 
 class DataSyncScreen extends StatefulWidget {
   const DataSyncScreen({super.key});
@@ -297,6 +298,41 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
     });
   }
 
+  Future<void> _recheckBalances() async {
+    setState(() => _busy = true);
+    try {
+      final fixed = await DBHelper.instance.recheckVendorBalances();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(fixed.isEmpty ? 'All balances correct' : '${fixed.length} balance(s) corrected'),
+          content: fixed.isEmpty
+              ? const Text('Every vendor balance matches their transaction history.')
+              : SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final f in fixed)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text('${f['name']}: ${formatCurrency(f['old'])} → ${formatCurrency(f['new'])}'),
+                        ),
+                    ],
+                  ),
+                ),
+          actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not recheck: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -347,6 +383,34 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
             ),
           ),
           if (UserRole.instance.isAdmin) ...[
+            const SizedBox(height: 16),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      IconBadge(icon: Icons.fact_check_outlined, color: AppTheme.accent, size: 18),
+                      SizedBox(width: 10),
+                      Text('Recheck vendor balances',
+                          style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Recalculates every vendor\'s balance from their full credit and payment history, '
+                    'and fixes any that don\'t match. Safe to run anytime.',
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _recheckBalances,
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: const Text('Recheck now'),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 16),
             AppCard(
               child: Column(

@@ -3,6 +3,7 @@ import '../db/db_helper.dart';
 import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
 import '../utils/user_role.dart';
+import '../utils/keyed_stream.dart';
 
 const List<String> kExpenseCategories = [
   'Rent',
@@ -21,6 +22,7 @@ class ExpensesScreen extends StatefulWidget {
 }
 
 class _ExpensesScreenState extends State<ExpensesScreen> {
+  final _expensesStream = KeyedStream<List<Map<String, dynamic>>>();
   final _db = DBHelper.instance;
   String _period = 'Month'; // Week, Month, Custom
   DateTime _customStart = DateTime.now().subtract(const Duration(days: 29));
@@ -210,7 +212,8 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
           ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: _db.watchExpenses(startIso: start, endIsoExclusive: end),
+              stream: _expensesStream.get('$start|$end',
+                  () => _db.watchExpenses(startIso: start, endIsoExclusive: end)),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return ErrorState(message: 'Could not load expenses: ${snapshot.error}');
