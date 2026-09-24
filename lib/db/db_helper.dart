@@ -49,8 +49,13 @@ class _CreditLot {
 /// outstanding", and the average stayed stuck even as vendors paid.
 /// One shared function used by the Vendors screen, Vendor Insights and
 /// the Dashboard, so they can never disagree.
-DateTime? oldestUnpaidCreditSince(List<Map<String, dynamic>> txns) {
-  final sorted = [...txns]
+DateTime? oldestUnpaidCreditSince(Iterable<dynamic> txns) {
+  // Accepts any list of transaction maps (typed or not), so a caller's
+  // list type can never break the build.
+  final sorted = txns
+      .whereType<Map>()
+      .map((t) => Map<String, dynamic>.from(t))
+      .toList()
     ..sort((a, b) => (a['date'] as String? ?? '').compareTo(b['date'] as String? ?? ''));
   final lots = <_CreditLot>[];
   double advance = 0; // paid before the credit existed (overpayment)
@@ -824,7 +829,7 @@ class DBHelper {
     for (final v in vendors) {
       final vid = v['id'] as String;
       final balance = (v['balance'] as num?)?.toDouble() ?? 0;
-      final since = balance > 0 ? oldestUnpaidCreditSince(analyticsTxns[vid] ?? const []) : null;
+      final since = balance > 0 ? oldestUnpaidCreditSince(analyticsTxns[vid] ?? const <Map<String, dynamic>>[]) : null;
       final daysOutstanding = since == null ? null : DateTime.now().difference(since).inDays;
       result.add({
         ...v,

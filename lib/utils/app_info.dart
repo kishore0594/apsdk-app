@@ -5,7 +5,7 @@
 /// rather than guessing from "I installed it last week".
 class AppInfo {
   static const String appName = 'Madhura Agro Traders';
-  static const String appVersion = '1.21.0';
+  static const String appVersion = '1.21.1';
   static const String buildDate = 'September 21, 2026 (shared vendor form, reminder history, FIFO aging, sync-safe balances)';
 
   /// Required to create a new account from the Sign Up screen. This app
@@ -24,6 +24,6 @@ class AppInfo {
   /// than intended, or swap it for a phrase of your own choosing.
   static const String signupAccessCode = 'GOLDEN-HARVEST-92';
 
-  /// e.g. "v1.21.0 · September 21, 2026 (shared vendor form, reminder history, FIFO aging, sync-safe balances)"
+  /// e.g. "v1.21.1 · September 21, 2026 (shared vendor form, reminder history, FIFO aging, sync-safe balances)"
   static String get versionLine => 'v$appVersion · $buildDate';
 }

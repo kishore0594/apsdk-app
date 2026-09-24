@@ -249,7 +249,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final balance = (v['balance'] as num?)?.toDouble() ?? 0;
       if (balance <= 0) continue;
       final vendorId = v['id'] as String;
-      final txns = [...(txnsByVendor[vendorId] ?? [])]
+      final txns = <Map<String, dynamic>>[...(txnsByVendor[vendorId] ?? const <Map<String, dynamic>>[])]
         ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
       final since = oldestUnpaidCreditSince(txns);
       if (since == null) continue;

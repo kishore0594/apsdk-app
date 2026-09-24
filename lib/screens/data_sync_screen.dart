@@ -316,7 +316,7 @@ class _DataSyncScreenState extends State<DataSyncScreen> {
                       for (final f in fixed)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),
-                          child: Text('${f['name']}: ${formatCurrency(f['old'])} → ${formatCurrency(f['new'])}'),
+                          child: Text('${f['name']}: ${formatCurrency(f['old'] as num)} → ${formatCurrency(f['new'] as num)}'),
                         ),
                     ],
                   ),
