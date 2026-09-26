@@ -970,6 +970,9 @@ class DBHelper {
     await _write(_fs.collection('users').doc(uid).set({
       'email': email,
       'role': 'viewer',
+      // Waits for a master to approve it in Manage Users (see
+      // firestore.rules) — signing up alone no longer grants access.
+      'approved': false,
       'created_at': DateTime.now().toIso8601String(),
     }));
   }
@@ -978,8 +981,13 @@ class DBHelper {
     return _fs.collection('users').snapshots().map(_fromSnapshot);
   }
 
+  /// role: 'admin' or 'viewer' approves the account with that role;
+  /// 'revoked' removes its access (the account itself is kept).
   Future<void> setUserRole(String uid, String role) async {
-    await _write(_fs.collection('users').doc(uid).set({'role': role}, SetOptions(merge: true)));
+    final data = role == 'revoked'
+        ? {'approved': false}
+        : {'role': role, 'approved': true};
+    await _write(_fs.collection('users').doc(uid).set(data, SetOptions(merge: true)));
   }
 
   // ---------------- OPERATING EXPENSES ----------------

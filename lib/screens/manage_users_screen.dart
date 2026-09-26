@@ -15,7 +15,7 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
   final _db = DBHelper.instance;
 
   Future<void> _changeRole(Map<String, dynamic> user) async {
-    final currentRole = user['role'] as String? ?? 'viewer';
+    final currentRole = user['approved'] == true ? (user['role'] as String? ?? 'viewer') : 'revoked';
     final newRole = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
@@ -35,6 +35,13 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
               groupValue: currentRole,
               title: const Text('Admin'),
               subtitle: const Text('Full access — same as your own account'),
+              onChanged: (v) => Navigator.pop(context, v),
+            ),
+            RadioListTile<String>(
+              value: 'revoked',
+              groupValue: currentRole,
+              title: const Text('No access'),
+              subtitle: const Text('Waiting for approval, or access removed'),
               onChanged: (v) => Navigator.pop(context, v),
             ),
           ],
@@ -67,8 +74,8 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Text(
-                  'This list shows accounts created through Sign Up. Accounts set up before this '
-                  'feature existed aren\'t shown here, but continue to have full access.',
+                  'New sign-ups can\'t see anything until you approve them here. Owner accounts '
+                  'are listed in Firebase under "admins" and always have full access.',
                   style: TextStyle(fontSize: 12, height: 1.4),
                 ),
               ),
@@ -101,7 +108,9 @@ class _ManageUsersScreenState extends State<ManageUsersScreen> {
                                     style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                                 const SizedBox(height: 2),
                                 Text(
-                                  u['role'] == 'admin' ? 'Admin — full access' : 'View Only',
+                                  u['approved'] != true
+                                      ? 'Waiting for approval — tap to allow'
+                                      : (u['role'] == 'admin' ? 'Admin — full access' : 'View Only'),
                                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                                 ),
                               ],

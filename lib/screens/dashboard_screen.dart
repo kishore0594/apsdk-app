@@ -14,6 +14,8 @@ import 'sales_screen.dart';
 import 'vendors_screen.dart';
 import 'vendor_insights_screen.dart';
 import 'product_margins_screen.dart';
+import 'web_store_screen.dart';
+import 'online_orders_screen.dart';
 import 'todays_collections_screen.dart';
 import 'data_sync_screen.dart';
 import 'suppliers_screen.dart';
@@ -435,6 +437,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 side: BorderSide.none,
               ),
             ),
+          const NewOrdersBell(),
           IconButton(
             tooltip: AppStrings.t('language'),
             icon: const Icon(Icons.language),
@@ -728,6 +731,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductMarginsScreen()));
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.storefront_outlined, color: AppTheme.primary, size: 18),
+              title: const Text('Web Store'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const WebStoreScreen()));
+              },
+            ),
+            ListTile(
+              leading: const IconBadge(icon: Icons.shopping_bag_outlined, color: Color(0xFFE36A06), size: 18),
+              title: const Text('Online Orders'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const OnlineOrdersScreen()));
               },
             ),
             ListTile(

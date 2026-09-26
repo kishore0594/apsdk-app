@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,6 +11,7 @@ import 'utils/locale_controller.dart';
 import 'utils/app_strings.dart';
 import 'utils/user_role.dart';
 import 'utils/session_lock.dart';
+import 'services/web_store_service.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -230,7 +232,20 @@ class _RootNavState extends State<RootNav> {
 
   Future<void> _loadRole() async {
     await UserRole.instance.load();
+    // Master accounts keep the web store's catalog in step with the
+    // app's products automatically (see WebStoreService).
+    if (UserRole.instance.isAdmin) {
+      WebStoreService.instance.startAutoSync();
+    } else {
+      WebStoreService.instance.stopAutoSync();
+    }
     if (mounted) setState(() => _roleLoaded = true);
+  }
+
+  @override
+  void dispose() {
+    WebStoreService.instance.stopAutoSync();
+    super.dispose();
   }
 
   final _screens = const [
@@ -245,6 +260,12 @@ class _RootNavState extends State<RootNav> {
   Widget build(BuildContext context) {
     if (!_roleLoaded) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (UserRole.instance.isPending) {
+      return _PendingAccessScreen(onRetry: () async {
+        setState(() => _roleLoaded = false);
+        await _loadRole();
+      });
     }
     return Scaffold(
       body: IndexedStack(index: _index, children: _screens),
@@ -273,6 +294,88 @@ class _RootNavState extends State<RootNav> {
               selectedIcon: const Icon(Icons.local_shipping),
               label: AppStrings.t('nav_suppliers')),
         ],
+      ),
+    );
+  }
+}
+
+/// Shown to an account that isn't allowed in yet: a new sign-up waiting
+/// for approval, or an owner whose user ID hasn't been added to `admins`.
+class _PendingAccessScreen extends StatelessWidget {
+  final Future<void> Function() onRetry;
+  const _PendingAccessScreen({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? '';
+    return Scaffold(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const SizedBox(height: 24),
+            const Icon(Icons.lock_clock_outlined, size: 56, color: AppTheme.primary),
+            const SizedBox(height: 16),
+            const Text('Waiting for access',
+                textAlign: TextAlign.center, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Text(
+              'Signed in as ${user?.email ?? ''}. A master account needs to allow this account in '
+              'Manage Users before it can see the shop\'s data.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13.5, height: 1.4),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Owner of the shop?',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'In the Firebase console, open Firestore, collection "admins", and add a '
+                    'document whose ID is the user ID below (any field, e.g. role: owner). '
+                    'Then tap Check again.',
+                    style: TextStyle(fontSize: 12.5, height: 1.4),
+                  ),
+                  const SizedBox(height: 10),
+                  SelectableText(uid, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: uid));
+                      ScaffoldMessenger.of(context)
+                          .showSnackBar(const SnackBar(content: Text('User ID copied')));
+                    },
+                    icon: const Icon(Icons.copy, size: 16),
+                    label: const Text('Copy user ID'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Check again'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () async {
+                UserRole.instance.reset();
+                await SessionLock.instance.lock();
+              },
+              child: const Text('Sign out'),
+            ),
+          ],
+        ),
       ),
     );
   }
