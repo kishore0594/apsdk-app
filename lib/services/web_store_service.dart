@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'grain_library.dart';
+import '../utils/tamil_names.dart';
 
 enum WebSyncState { idle, pending, publishing, upToDate, error }
 
@@ -138,7 +139,8 @@ class WebStoreService {
       items.add({
         'id': p['id'],
         'name': (p['name'] ?? '').toString().trim(),
-        'nameLocal': (p['name_local'] ?? '').toString().trim(),
+        // The shop's own Tamil name, otherwise an automatic one.
+        'nameLocal': tamilNameOf(p),
         'category': categoryOf(p),
         'image': (photo != null && photo.isNotEmpty) ? 'fs:${p['id']}:${photoHash(photo)}' : '',
         'inStock': ((p['quantity'] as num?)?.toDouble() ?? 0) > 0,
@@ -197,7 +199,12 @@ class WebStoreService {
     return {
       'store': Map<String, dynamic>.from((settings['store'] as Map?) ?? const {}),
       'categories': order,
-      'categoriesLocal': Map<String, dynamic>.from((settings['categories_local'] as Map?) ?? const {}),
+      'categoriesLocal': {
+        for (final c in order)
+          if (autoTamilCategory(c) != null) c: autoTamilCategory(c),
+        ...Map<String, dynamic>.from((settings['categories_local'] as Map?) ?? const {})
+          ..removeWhere((k, v) => v.toString().trim().isEmpty),
+      },
       'hiddenCategories':
           ((settings['hidden_categories'] as List?) ?? const []).map((e) => e.toString()).toList(),
       'products': items,

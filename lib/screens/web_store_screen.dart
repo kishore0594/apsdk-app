@@ -6,6 +6,7 @@ import '../utils/keyed_stream.dart';
 import '../utils/user_role.dart';
 import 'web_content_screen.dart';
 import '../services/grain_library.dart';
+import '../utils/tamil_names.dart';
 
 /// Manage the web store entirely from the app: shop details, categories,
 /// and which products appear online (with Tamil name, pack label, offer
@@ -444,7 +445,8 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
               if (WebStoreService.hasOnlinePrice(p)) 'Shop ${formatCurrency(WebStoreService.shopPriceOf(p))}',
             ].join(' · '),
       qty > 0 ? 'In stock' : 'Out of stock',
-      if ((p['name_local'] ?? '').toString().isNotEmpty) p['name_local'].toString(),
+      if (tamilNameOf(p).isNotEmpty)
+        (p['name_local'] ?? '').toString().trim().isEmpty ? '${tamilNameOf(p)} (auto)' : tamilNameOf(p),
     ].join(' · ');
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -531,7 +533,13 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
             const SizedBox(height: 10),
             TextField(
                 controller: tamil,
-                decoration: const InputDecoration(labelText: 'Tamil name', border: OutlineInputBorder())),
+                decoration: InputDecoration(
+                    labelText: 'Tamil name',
+                    hintText: autoTamil((p['name'] ?? '').toString()) ?? '',
+                    helperText: autoTamil((p['name'] ?? '').toString()) == null
+                        ? 'Type the Tamil name — no automatic name for this product'
+                        : 'Empty = automatic name shown as the hint',
+                    border: const OutlineInputBorder())),
             const SizedBox(height: 10),
             TextField(
               controller: pack,

@@ -6,6 +6,7 @@ import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
 import '../utils/user_role.dart';
 import '../utils/app_theme.dart';
+import '../utils/tamil_names.dart';
 
 class InventoryScreen extends StatefulWidget {
   final String? initialCategoryFilter;
@@ -55,7 +56,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     var list = products;
     if (_search.isNotEmpty) {
       final q = _search.toLowerCase();
-      list = list.where((p) => (p['name'] as String).toLowerCase().contains(q)).toList();
+      list = list.where((p) => nameMatches(p, q)).toList();
     }
     if (_categoryFilter == 'Low Stock') {
       return list.where((p) {
@@ -261,7 +262,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                         Row(
                                           children: [
                                             Flexible(
-                                              child: Text(p['name'] as String,
+                                              child: Text(displayName(p),
                                                   overflow: TextOverflow.ellipsis,
                                                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
                                             ),

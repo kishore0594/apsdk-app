@@ -9,6 +9,7 @@ import '../utils/user_role.dart';
 import 'vendors_screen.dart';
 import '../utils/chart_style.dart';
 import '../utils/keyed_stream.dart';
+import '../utils/tamil_names.dart';
 
 // Units sold by weight/volume need decimal quantities (e.g. 0.75 Kgs).
 // Count-based units (Nos, Box, Dozen, Packet...) stay whole numbers.
@@ -783,11 +784,11 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) => Autocomplete<Map<String, dynamic>>(
-                      displayStringForOption: (p) => p['name'] as String,
+                      displayStringForOption: (p) => displayName(p),
                       optionsBuilder: (value) {
                         if (value.text.trim().isEmpty) return const Iterable<Map<String, dynamic>>.empty();
                         final q = value.text.toLowerCase();
-                        return _products.where((p) => (p['name'] as String).toLowerCase().contains(q));
+                        return _products.where((p) => nameMatches(p, q));
                       },
                       onSelected: (p) {
                         _addProduct(p);
@@ -827,7 +828,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                                               width: 32, height: 32, fit: BoxFit.cover),
                                         )
                                       : null,
-                                  title: Text(p['name'] as String),
+                                  title: Text(displayName(p)),
                                   subtitle: Text(
                                       '${formatCurrency(p['selling_price'])}/${p['unit']} • stock ${p['quantity']}'),
                                   onTap: () => onSelected(p),
@@ -878,7 +879,7 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                               final line = _cart[i];
                               return ListTile(
                                 dense: true,
-                                title: Text(line.product['name'] as String),
+                                title: Text(displayName(line.product)),
                                 subtitle: Text(formatCurrency(line.product['selling_price'])),
                                 leading: Row(
                                   mainAxisSize: MainAxisSize.min,
