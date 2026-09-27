@@ -69,7 +69,17 @@ class WebStoreService {
   static String photoHash(String photo) =>
       sha1.convert(utf8.encode(photo)).toString().substring(0, 12);
 
-  static double priceOf(Map<String, dynamic> p) => (p['selling_price'] as num?)?.toDouble() ?? 0;
+  /// Shop (offline) price — the Inventory selling price, used by app sales.
+  static double shopPriceOf(Map<String, dynamic> p) => (p['selling_price'] as num?)?.toDouble() ?? 0;
+
+  /// Online price per unit: the Web Store's online price when set,
+  /// otherwise the shop price. Everything on the website uses this.
+  static double priceOf(Map<String, dynamic> p) {
+    final online = (p['web_price'] as num?)?.toDouble() ?? 0;
+    return online > 0 ? online : shopPriceOf(p);
+  }
+
+  static bool hasOnlinePrice(Map<String, dynamic> p) => ((p['web_price'] as num?)?.toDouble() ?? 0) > 0;
 
   /// Price a web customer pays today: the offer price when it's valid.
   static double webPriceOf(Map<String, dynamic> p) {

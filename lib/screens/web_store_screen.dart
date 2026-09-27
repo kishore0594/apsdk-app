@@ -439,7 +439,10 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
       WebStoreService.packLabel(p),
       price <= 0
           ? 'No price'
-          : (webPrice < price ? '${formatCurrency(webPrice)} (offer)' : formatCurrency(price)),
+          : [
+              'Online ${webPrice < price ? '${formatCurrency(webPrice)} (offer)' : formatCurrency(price)}',
+              if (WebStoreService.hasOnlinePrice(p)) 'Shop ${formatCurrency(WebStoreService.shopPriceOf(p))}',
+            ].join(' · '),
       qty > 0 ? 'In stock' : 'Out of stock',
       if ((p['name_local'] ?? '').toString().isNotEmpty) p['name_local'].toString(),
     ].join(' · ');
@@ -496,7 +499,9 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
     bool byWeight = WebStoreService.sellsByWeight(p);
     bool bestseller = p['web_bestseller'] == true;
     bool isNew = p['web_new'] == true;
-    final price = WebStoreService.priceOf(p);
+    final shopPrice = WebStoreService.shopPriceOf(p);
+    final onlinePrice = TextEditingController(
+        text: WebStoreService.hasOnlinePrice(p) ? (p['web_price'] as num).toString() : '');
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -511,9 +516,19 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
           children: [
             Text((p['name'] ?? '').toString(), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text('Selling price ${formatCurrency(price)} per ${(p['unit'] ?? 'unit')} — change it in Inventory.',
+            Text('Shop price ${formatCurrency(shopPrice)} per ${(p['unit'] ?? 'unit')} (Inventory) — used for sales in the shop.',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
+            TextField(
+              controller: onlinePrice,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                  labelText: 'Online price per ${(p['unit'] ?? 'unit')} (₹)',
+                  hintText: 'Empty = same as shop price',
+                  helperText: 'Used only on the website. Sell by weight uses it as the price per kg.',
+                  border: const OutlineInputBorder()),
+            ),
+            const SizedBox(height: 10),
             TextField(
                 controller: tamil,
                 decoration: const InputDecoration(labelText: 'Tamil name', border: OutlineInputBorder())),
@@ -532,7 +547,7 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
                   labelText: 'Offer price (optional)',
-                  helperText: 'Shown crossed-out against the selling price; must be lower',
+                  helperText: 'Shown crossed-out against the online price; must be lower',
                   border: OutlineInputBorder()),
             ),
             const SizedBox(height: 10),
@@ -614,7 +629,7 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
               value: byWeight,
               title: const Text('Sell by weight'),
               subtitle: Text('Website offers 500 g, 1 kg, 5 kg or any amount the customer types. '
-                  'Selling price must be per kg (unit: ${p['unit'] ?? '—'}).'),
+                  'Prices must be per kg (unit: ${p['unit'] ?? '—'}).'),
               onChanged: (v) => setSheet(() => byWeight = v),
             ),
             SwitchListTile(
@@ -647,12 +662,16 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
       ),
     );
     if (saved != true) return;
+    final onlineV = double.tryParse(onlinePrice.text.trim()) ?? 0;
+    // Offer is checked against the price customers will actually see.
+    final price = onlineV > 0 ? onlineV : shopPrice;
     final offerV = double.tryParse(offer.text.trim()) ?? 0;
     if (offerV > 0 && offerV >= price && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Offer price must be lower than the selling price — offer not saved.')));
     }
     await _svc.updateProductWeb(p['id'] as String, {
+      'web_price': onlineV > 0 ? onlineV : 0,
       'name_local': tamil.text.trim(),
       'web_pack': pack.text.trim(),
       'offer_price': (offerV > 0 && offerV < price) ? offerV : 0,
