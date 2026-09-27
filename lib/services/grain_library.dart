@@ -231,3 +231,50 @@ GrainInfo? findGrainInfo(Map<String, dynamic> product) {
   }
   return null;
 }
+
+/// Short "About" text per grain [English, Tamil], keyed by the first
+/// keyword of its library entry. Descriptive only — no health claims.
+const grainAbout = <String, List<String>>{
+  'ragi': [
+    'Ragi (finger millet) is a traditional South Indian millet, used for koozh, dosa and roti.',
+    'கேழ்வரகு ஒரு பாரம்பரிய தென்னிந்திய சிறுதானியம் — கூழ், தோசை, ரொட்டிக்கு பயன்படுகிறது.',
+  ],
+  'foxtail': [
+    'Thinai (foxtail millet) is a small golden millet that cooks like rice.',
+    'தினை ஒரு சிறிய பொன்னிற சிறுதானியம் — அரிசி போலவே சமைக்கலாம்.',
+  ],
+  'little millet': [
+    'Samai (little millet) is a light, small-grained millet, easy to cook as rice or pongal.',
+    'சாமை ஒரு இலகுவான சிறிய சிறுதானியம் — சாதமாகவோ பொங்கலாகவோ எளிதில் சமைக்கலாம்.',
+  ],
+  'kodo': [
+    'Varagu (kodo millet) is a traditional millet, good in place of rice for everyday meals.',
+    'வரகு ஒரு பாரம்பரிய சிறுதானியம் — அன்றாட உணவில் அரிசிக்கு பதிலாக பயன்படுத்தலாம்.',
+  ],
+  'barnyard': [
+    'Kuthiraivali (barnyard millet) is a quick-cooking millet, popular for rice and idli.',
+    'குதிரைவாலி விரைவில் வேகும் சிறுதானியம் — சாதம், இட்லிக்கு பிரபலமானது.',
+  ],
+  'proso': [
+    'Panivaragu (proso millet) is a mild-tasting millet, good for upma and porridge.',
+    'பனிவரகு மென்மையான சுவையுள்ள சிறுதானியம் — உப்புமா, கஞ்சிக்கு ஏற்றது.',
+  ],
+  'pearl millet': [
+    'Kambu (pearl millet) is a traditional millet, best known for summer kambu koozh.',
+    'கம்பு ஒரு பாரம்பரிய சிறுதானியம் — கோடைகால கம்பங்கூழுக்கு பிரபலமானது.',
+  ],
+  'sorghum': [
+    'Cholam (sorghum) is a hearty grain used for roti, dosa and upma.',
+    'சோளம் ஒரு சத்தான தானியம் — ரொட்டி, தோசை, உப்புமாவுக்கு பயன்படுகிறது.',
+  ],
+  'horse gram': [
+    'Kollu (horse gram) is a traditional South Indian pulse, used for rasam, sundal and thuvaiyal.',
+    'கொள்ளு ஒரு பாரம்பரிய தென்னிந்திய பயறு — ரசம், சுண்டல், துவையலுக்கு பயன்படுகிறது.',
+  ],
+  'green gram': [
+    'Pasi payaru (green gram) is an everyday pulse for sundal, kootu, dosa and sprouts.',
+    'பாசிப்பயறு அன்றாட பயறு — சுண்டல், கூட்டு, தோசை, முளைப்பயறுக்கு ஏற்றது.',
+  ],
+};
+
+List<String> aboutFor(GrainInfo g) => grainAbout[g.keywords.first] ?? const ['', ''];

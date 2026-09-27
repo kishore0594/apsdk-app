@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'grain_library.dart';
 
 enum WebSyncState { idle, pending, publishing, upToDate, error }
 
@@ -89,7 +90,13 @@ class WebStoreService {
     return unit.isEmpty ? '1 unit' : '1 $unit';
   }
 
-  static bool sellsByWeight(Map<String, dynamic> p) => p['web_by_weight'] == true;
+  static bool unitIsKg(Map<String, dynamic> p) =>
+      RegExp(r'^\s*(kg|kgs|kilo|kilos|kilogram|kilograms)\s*\.?$', caseSensitive: false)
+          .hasMatch((p['unit'] ?? '').toString());
+
+  /// On automatically for products sold in kg, unless switched off.
+  static bool sellsByWeight(Map<String, dynamic> p) =>
+      p['web_weight'] is bool ? p['web_weight'] as bool : unitIsKg(p);
   static double _r2(double v) => (v * 100).roundToDouble() / 100;
 
   static String categoryOf(Map<String, dynamic> p) {
@@ -105,6 +112,17 @@ class WebStoreService {
     final items = <Map<String, dynamic>>[];
     for (final p in products.where(isOnline)) {
       final price = priceOf(p);
+      // Library content fills anything the shop hasn't written itself.
+      final lib = findGrainInfo(p);
+      List<String> own(String k, List<String>? fallback) {
+        final v = _lines(p[k]);
+        return v.isNotEmpty ? v : (fallback ?? const []);
+      }
+      String ownText(String k, String fallback) {
+        final v = (p[k] ?? '').toString().trim();
+        return v.isNotEmpty ? v : fallback;
+      }
+      final about = lib == null ? const ['', ''] : aboutFor(lib);
       final offer = (p['offer_price'] as num?)?.toDouble() ?? 0;
       final photo = p['photo'] as String?;
       items.add({
@@ -115,17 +133,17 @@ class WebStoreService {
         'image': (photo != null && photo.isNotEmpty) ? 'fs:${p['id']}:${photoHash(photo)}' : '',
         'inStock': ((p['quantity'] as num?)?.toDouble() ?? 0) > 0,
         'order': (p['web_order'] as num?)?.toInt() ?? 999,
-        'description': (p['web_desc'] ?? '').toString().trim(),
-        'descriptionLocal': (p['web_desc_local'] ?? '').toString().trim(),
+        'description': ownText('web_desc', about[0]),
+        'descriptionLocal': ownText('web_desc_local', about[1]),
         'details': ((p['web_details'] as List?) ?? const [])
             .map((d) => d.toString().trim())
             .where((d) => d.isNotEmpty)
             .toList(),
         'homemade': p['web_homemade'] == true,
-        'benefits': _lines(p['web_benefits']),
-        'benefitsLocal': _lines(p['web_benefits_local']),
-        'howTo': _lines(p['web_howto']),
-        'howToLocal': _lines(p['web_howto_local']),
+        'benefits': own('web_benefits', lib?.benefits),
+        'benefitsLocal': own('web_benefits_local', lib?.benefitsTa),
+        'howTo': own('web_howto', lib?.howTo),
+        'howToLocal': own('web_howto_local', lib?.howToTa),
         'tips': [
           for (final t in (approvedTips[p['id']] ?? const <Map<String, dynamic>>[]).take(20))
             {'name': (t['name'] ?? '').toString(), 'text': (t['text'] ?? '').toString()}

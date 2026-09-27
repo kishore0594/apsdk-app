@@ -493,7 +493,7 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
     final howToTa = TextEditingController(text: joinL('web_howto_local'));
     final lib = findGrainInfo(p);
     bool homemade = p['web_homemade'] == true;
-    bool byWeight = p['web_by_weight'] == true;
+    bool byWeight = WebStoreService.sellsByWeight(p);
     bool bestseller = p['web_bestseller'] == true;
     bool isNew = p['web_new'] == true;
     final price = WebStoreService.priceOf(p);
@@ -578,6 +578,8 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                       benefitsTa.text = lib.benefitsTa.join('\n');
                       howTo.text = lib.howTo.join('\n');
                       howToTa.text = lib.howToTa.join('\n');
+                      if (desc.text.trim().isEmpty) desc.text = aboutFor(lib)[0];
+                      if (descTa.text.trim().isEmpty) descTa.text = aboutFor(lib)[1];
                     }),
                     icon: const Icon(Icons.auto_awesome, size: 18),
                     label: const Text('Fill from library'),
@@ -659,7 +661,7 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
       'web_desc_local': descTa.text.trim(),
       'web_details': details.text.split('\n').map((d) => d.trim()).where((d) => d.isNotEmpty).toList(),
       'web_homemade': homemade,
-      'web_by_weight': byWeight,
+      'web_weight': byWeight,
       'web_benefits': _splitLines(benefits.text),
       'web_benefits_local': _splitLines(benefitsTa.text),
       'web_howto': _splitLines(howTo.text),
