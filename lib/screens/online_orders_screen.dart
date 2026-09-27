@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
@@ -359,8 +358,10 @@ class _OrderSheetState extends State<_OrderSheet> {
             {
               'product_id': c['id'],
               'product_name': ((c['product'] as Map)['name'] ?? c['name']).toString(),
-              'quantity': c['qty'],
-              'unit_price': useApp ? c['current_price'] : c['ordered_price'],
+              // Inventory quantity in app units (kg for weight items),
+              // priced per unit so the sale total matches the order.
+              'quantity': c['units'],
+              'unit_price': ((useApp ? c['current_price'] : c['ordered_price']) as double) / (c['per_pack'] as double),
             }
         ],
         discount: 0,
@@ -674,8 +675,6 @@ class _NewOrdersBellState extends State<NewOrdersBell> {
         if (snap.hasData) {
           if (_last != null && n > _last!) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              HapticFeedback.heavyImpact();
-              SystemSound.play(SystemSoundType.click);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                   content: const Text('New web store order'),

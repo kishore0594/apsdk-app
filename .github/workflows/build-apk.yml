@@ -83,6 +83,7 @@ jobs:
           </paths>
           XMLEOF
           sed -i 's/^          //' android/app/src/main/res/xml/provider_paths.xml
+          sed -i '0,/<application/s##<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <application#' $MANIFEST
           sed -i 's#</application>#    <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.provider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/provider_paths" /></provider>\n    </application>#' $MANIFEST
           if grep -q "<queries>" $MANIFEST; then
             sed -i 's#<queries>#<queries>\n        <package android:name="com.whatsapp" />\n        <package android:name="com.whatsapp.w4b" />#' $MANIFEST
@@ -104,8 +105,14 @@ jobs:
           echo "$PKG_LINE" > "$MAIN"
           cat >> "$MAIN" << 'KTEOF'
 
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.content.Context
           import android.content.Intent
           import android.content.pm.PackageManager
+          import android.os.Build
+          import androidx.core.app.NotificationCompat
           import androidx.core.content.FileProvider
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
@@ -115,6 +122,7 @@ jobs:
           class MainActivity : FlutterActivity() {
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
+                  setupNotifications(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madhura/whatsapp")
                       .setMethodCallHandler { call, result ->
                           if (call.method != "sendImage") {
@@ -144,6 +152,65 @@ jobs:
                               result.success("ok")
                           } catch (e: Exception) {
                               result.error("share_failed", e.message, null)
+                          }
+                      }
+              }
+
+              // New-order alerts: sound, vibration and the notification bar.
+              // Written in-house (no plugin) so it can't break the build.
+              private fun setupNotifications(flutterEngine: FlutterEngine) {
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madhura/notify")
+                      .setMethodCallHandler { call, result ->
+                          when (call.method) {
+                              "permission" -> {
+                                  if (Build.VERSION.SDK_INT >= 33 &&
+                                      checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
+                                  ) {
+                                      requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7001)
+                                      result.success(false)
+                                  } else {
+                                      result.success(true)
+                                  }
+                              }
+                              "show" -> {
+                                  try {
+                                      if (Build.VERSION.SDK_INT >= 33 &&
+                                          checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
+                                      ) {
+                                          result.success(false)
+                                          return@setMethodCallHandler
+                                      }
+                                      val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                                      if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel("orders") == null) {
+                                          val channel = NotificationChannel("orders", "New orders", NotificationManager.IMPORTANCE_HIGH)
+                                          channel.description = "New web store orders"
+                                          channel.enableVibration(true)
+                                          channel.vibrationPattern = longArrayOf(0, 400, 200, 400)
+                                          manager.createNotificationChannel(channel)
+                                      }
+                                      val open = Intent(this, MainActivity::class.java).apply {
+                                          flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                      }
+                                      val pending = PendingIntent.getActivity(
+                                          this, 0, open,
+                                          PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                                      )
+                                      val notification = NotificationCompat.Builder(this, "orders")
+                                          .setSmallIcon(android.R.drawable.stat_notify_chat)
+                                          .setContentTitle(call.argument<String>("title") ?: "New order")
+                                          .setContentText(call.argument<String>("body") ?: "")
+                                          .setPriority(NotificationCompat.PRIORITY_HIGH)
+                                          .setDefaults(NotificationCompat.DEFAULT_ALL)
+                                          .setAutoCancel(true)
+                                          .setContentIntent(pending)
+                                          .build()
+                                      manager.notify(call.argument<Int>("id") ?: 1, notification)
+                                      result.success(true)
+                                  } catch (e: Exception) {
+                                      result.error("notify_failed", e.message, null)
+                                  }
+                              }
+                              else -> result.notImplemented()
                           }
                       }
               }

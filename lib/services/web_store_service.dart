@@ -31,6 +31,7 @@ class WebStoreService {
   CollectionReference<Map<String, dynamic>> get _images => _fs.collection('catalog_images');
   CollectionReference<Map<String, dynamic>> get _orders => _fs.collection('orders');
   CollectionReference<Map<String, dynamic>> get _products => _fs.collection('products');
+  CollectionReference<Map<String, dynamic>> get _tips => _fs.collection('tips');
 
   /// Same offline-safe save as the rest of the app: the write is stored
   /// on the phone instantly; we wait briefly for the server, then move on
@@ -88,13 +89,19 @@ class WebStoreService {
     return unit.isEmpty ? '1 unit' : '1 $unit';
   }
 
+  static bool sellsByWeight(Map<String, dynamic> p) => p['web_by_weight'] == true;
+  static double _r2(double v) => (v * 100).roundToDouble() / 100;
+
   static String categoryOf(Map<String, dynamic> p) {
     final c = (p['category'] as String? ?? '').trim();
     return c.isEmpty ? 'Other' : c;
   }
 
-  static Map<String, dynamic> buildCatalog(
-      List<Map<String, dynamic>> products, Map<String, dynamic> settings) {
+  static List<String> _lines(dynamic v) =>
+      ((v as List?) ?? const []).map((d) => d.toString().trim()).where((d) => d.isNotEmpty).toList();
+
+  static Map<String, dynamic> buildCatalog(List<Map<String, dynamic>> products, Map<String, dynamic> settings,
+      [Map<String, List<Map<String, dynamic>>> approvedTips = const {}]) {
     final items = <Map<String, dynamic>>[];
     for (final p in products.where(isOnline)) {
       final price = priceOf(p);
@@ -115,15 +122,39 @@ class WebStoreService {
             .where((d) => d.isNotEmpty)
             .toList(),
         'homemade': p['web_homemade'] == true,
+        'benefits': _lines(p['web_benefits']),
+        'benefitsLocal': _lines(p['web_benefits_local']),
+        'howTo': _lines(p['web_howto']),
+        'howToLocal': _lines(p['web_howto_local']),
+        'tips': [
+          for (final t in (approvedTips[p['id']] ?? const <Map<String, dynamic>>[]).take(20))
+            {'name': (t['name'] ?? '').toString(), 'text': (t['text'] ?? '').toString()}
+        ],
         'bestseller': p['web_bestseller'] == true,
         'isNew': p['web_new'] == true,
-        'packs': [
-          {
-            'label': packLabel(p),
-            'price': price,
-            if (offer > 0 && offer < price) 'offerPrice': offer,
-          }
-        ],
+        // Sell by weight: selling price is per kg; the website offers
+        // 500 g / 1 kg / 5 kg plus any custom amount the customer types.
+        if (sellsByWeight(p)) ...{
+          'byWeight': true,
+          'pricePerKg': price,
+          if (offer > 0 && offer < price) 'offerPerKg': offer,
+          'packs': [
+            for (final w in const [(0.5, '500 g'), (1.0, '1 kg'), (5.0, '5 kg')])
+              {
+                'label': w.$2,
+                'kg': w.$1,
+                'price': _r2(price * w.$1),
+                if (offer > 0 && offer < price) 'offerPrice': _r2(offer * w.$1),
+              }
+          ],
+        } else
+          'packs': [
+            {
+              'label': packLabel(p),
+              'price': price,
+              if (offer > 0 && offer < price) 'offerPrice': offer,
+            }
+          ],
       });
     }
     items.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
@@ -167,7 +198,9 @@ class WebStoreService {
   final ValueNotifier<WebSyncState> sync = ValueNotifier(WebSyncState.idle);
   String? lastError;
 
-  StreamSubscription? _productsSub, _settingsSub, _catalogSub;
+  StreamSubscription? _productsSub, _settingsSub, _catalogSub, _tipsSub;
+  Map<String, List<Map<String, dynamic>>> _approvedTips = const {};
+  bool _tipsSeen = false;
   List<Map<String, dynamic>>? _latestProducts;
   Map<String, dynamic>? _latestSettings;
   String? _liveSig;
@@ -188,6 +221,21 @@ class WebStoreService {
       _latestProducts = p;
       _schedule();
     }, onError: (Object e) => debugPrint('Products watch error: $e'));
+    _tipsSub = _tips.where('status', isEqualTo: 'approved').snapshots().listen((snap) {
+      final byProduct = <String, List<Map<String, dynamic>>>{};
+      for (final d in snap.docs) {
+        final m = d.data();
+        final pid = (m['productId'] ?? '').toString();
+        if (pid.isNotEmpty) byProduct.putIfAbsent(pid, () => []).add(m);
+      }
+      _approvedTips = byProduct;
+      _tipsSeen = true;
+      _schedule();
+    }, onError: (Object e) {
+      debugPrint('Tips watch error: $e');
+      _tipsSeen = true; // publish without tips rather than not at all
+      _schedule();
+    });
     _settingsSub = watchSettings().listen((s) {
       _latestSettings = s;
       _schedule();
@@ -199,15 +247,17 @@ class WebStoreService {
     _productsSub?.cancel();
     _settingsSub?.cancel();
     _catalogSub?.cancel();
-    _productsSub = _settingsSub = _catalogSub = null;
+    _tipsSub?.cancel();
+    _productsSub = _settingsSub = _catalogSub = _tipsSub = null;
+    _tipsSeen = false;
     _catalogSeen = false;
     sync.value = WebSyncState.idle;
   }
 
   void _schedule() {
     final products = _latestProducts, settings = _latestSettings;
-    if (products == null || settings == null || !_catalogSeen) return;
-    final sig = signatureOf(buildCatalog(products, settings));
+    if (products == null || settings == null || !_catalogSeen || !_tipsSeen) return;
+    final sig = signatureOf(buildCatalog(products, settings, _approvedTips));
     if (sig == _liveSig) {
       if (!_publishing) sync.value = WebSyncState.upToDate;
       return;
@@ -227,7 +277,7 @@ class WebStoreService {
     _publishing = true;
     sync.value = WebSyncState.publishing;
     try {
-      await _publish(products, settings);
+      await _publish(products, settings, _approvedTips);
       lastError = null;
       sync.value = WebSyncState.upToDate;
     } catch (e) {
@@ -242,8 +292,9 @@ class WebStoreService {
     }
   }
 
-  Future<void> _publish(List<Map<String, dynamic>> products, Map<String, dynamic> settings) async {
-    final catalog = buildCatalog(products, settings);
+  Future<void> _publish(List<Map<String, dynamic>> products, Map<String, dynamic> settings,
+      Map<String, List<Map<String, dynamic>>> tips) async {
+    final catalog = buildCatalog(products, settings, tips);
     final sig = signatureOf(catalog);
 
     // Photos first, so the website never points at a photo not yet there.
@@ -290,6 +341,19 @@ class WebStoreService {
 
   Future<void> saveSite(Map<String, dynamic> patch) => saveSettings({'site': patch});
 
+  // ---------------- Customer tips ----------------
+  // Customers suggest tips on the website ("pending"); only approved
+  // ones are published with the product.
+
+  Stream<List<Map<String, dynamic>>> watchTips(String status) =>
+      _tips.where('status', isEqualTo: status).snapshots().map((s) =>
+          s.docs.map((d) => <String, dynamic>{...d.data(), 'id': d.id}).toList());
+
+  Future<void> setTipStatus(String tipId, String status) =>
+      _write(_tips.doc(tipId).update({'status': status}));
+
+  Future<void> deleteTip(String tipId) => _write(_tips.doc(tipId).delete());
+
   // ---------------- Orders from the web store ----------------
 
   static const statuses = ['requested', 'confirmed', 'delivered', 'paid', 'cancelled'];
@@ -335,10 +399,15 @@ class WebStoreService {
       final product = productsById[item['id']];
       final ordered = (item['price'] as num?)?.toDouble() ?? 0;
       final qty = (item['qty'] as num?)?.toDouble() ?? 0;
-      final current = product == null ? null : webPriceOf(product);
+      // Weight items carry kg per pack (e.g. 2.5); others are one app unit.
+      final kg = (item['kg'] as num?)?.toDouble();
+      final perPack = kg ?? 1.0;
+      final current = product == null ? null : _r2(webPriceOf(product) * perPack);
       out.add({
         ...item,
         'qty': qty,
+        'per_pack': perPack,
+        'units': qty * perPack, // quantity to record in Inventory (kg for weight items)
         'ordered_price': ordered,
         'current_price': current,
         'product': product,

@@ -12,6 +12,7 @@ import 'utils/app_strings.dart';
 import 'utils/user_role.dart';
 import 'utils/session_lock.dart';
 import 'services/web_store_service.dart';
+import 'services/order_alerts.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -239,12 +240,19 @@ class _RootNavState extends State<RootNav> {
     } else {
       WebStoreService.instance.stopAutoSync();
     }
+    // New-order phone notifications for anyone allowed to see orders.
+    if (!UserRole.instance.isPending) {
+      OrderAlerts.instance.start();
+    } else {
+      OrderAlerts.instance.stop();
+    }
     if (mounted) setState(() => _roleLoaded = true);
   }
 
   @override
   void dispose() {
     WebStoreService.instance.stopAutoSync();
+    OrderAlerts.instance.stop();
     super.dispose();
   }
 

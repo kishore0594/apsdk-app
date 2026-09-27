@@ -5,6 +5,7 @@ import '../utils/formatters.dart';
 import '../utils/keyed_stream.dart';
 import '../utils/user_role.dart';
 import 'web_content_screen.dart';
+import '../services/grain_library.dart';
 
 /// Manage the web store entirely from the app: shop details, categories,
 /// and which products appear online (with Tamil name, pack label, offer
@@ -94,7 +95,21 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                   _sectionTitle('Categories'),
                   _categoriesCard(products, settings),
                   const SizedBox(height: 18),
-                  _sectionTitle('Products on the web store'),
+                  if (_canEdit) ...[
+                    _TipsCard(),
+                    const SizedBox(height: 18),
+                  ],
+                  Row(
+                    children: [
+                      Expanded(child: _sectionTitle('Products on the web store')),
+                      if (_canEdit)
+                        TextButton.icon(
+                          onPressed: () => _fillAllFromLibrary(products),
+                          icon: const Icon(Icons.auto_awesome, size: 16),
+                          label: const Text('Fill benefits', style: TextStyle(fontSize: 12.5)),
+                        ),
+                    ],
+                  ),
                   TextField(
                     decoration: const InputDecoration(
                       hintText: 'Search products',
@@ -113,6 +128,34 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
         },
       ),
     );
+  }
+
+  static List<String> _splitLines(String text) =>
+      text.split('\n').map((d) => d.trim()).where((d) => d.isNotEmpty).toList();
+
+  /// Fills Benefits / How to use from the grain library for every product
+  /// that matches and doesn't have its own text yet. Never overwrites.
+  Future<void> _fillAllFromLibrary(List<Map<String, dynamic>> products) async {
+    var n = 0;
+    for (final p in products) {
+      final lib = findGrainInfo(p);
+      if (lib == null) continue;
+      final hasOwn = ((p['web_benefits'] as List?) ?? const []).isNotEmpty ||
+          ((p['web_howto'] as List?) ?? const []).isNotEmpty;
+      if (hasOwn) continue;
+      await _svc.updateProductWeb(p['id'] as String, {
+        'web_benefits': lib.benefits,
+        'web_benefits_local': lib.benefitsTa,
+        'web_howto': lib.howTo,
+        'web_howto_local': lib.howToTa,
+      });
+      n++;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(n == 0
+            ? 'Nothing to fill — matching products already have their own text.'
+            : 'Filled $n product(s). Tap any product to review or edit.')));
   }
 
   Widget _sectionTitle(String t) => Padding(
@@ -443,7 +486,14 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
     final descTa = TextEditingController(text: (p['web_desc_local'] ?? '').toString());
     final details = TextEditingController(
         text: ((p['web_details'] as List?) ?? const []).map((d) => d.toString()).join('\n'));
+    String joinL(String k) => ((p[k] as List?) ?? const []).map((d) => d.toString()).join('\n');
+    final benefits = TextEditingController(text: joinL('web_benefits'));
+    final benefitsTa = TextEditingController(text: joinL('web_benefits_local'));
+    final howTo = TextEditingController(text: joinL('web_howto'));
+    final howToTa = TextEditingController(text: joinL('web_howto_local'));
+    final lib = findGrainInfo(p);
     bool homemade = p['web_homemade'] == true;
+    bool byWeight = p['web_by_weight'] == true;
     bool bestseller = p['web_bestseller'] == true;
     bool isNew = p['web_new'] == true;
     final price = WebStoreService.priceOf(p);
@@ -515,7 +565,56 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                     labelText: 'Details (one per line)',
                     hintText: 'Protein: 20%\nFeed 2–3 kg per cow per day',
                     border: OutlineInputBorder())),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Expanded(
+                    child: Text('Benefits and How to use',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+                if (lib != null)
+                  TextButton.icon(
+                    onPressed: () => setSheet(() {
+                      benefits.text = lib.benefits.join('\n');
+                      benefitsTa.text = lib.benefitsTa.join('\n');
+                      howTo.text = lib.howTo.join('\n');
+                      howToTa.text = lib.howToTa.join('\n');
+                    }),
+                    icon: const Icon(Icons.auto_awesome, size: 18),
+                    label: const Text('Fill from library'),
+                  ),
+              ],
+            ),
+            const Text('One point per line. Shown in the Benefits and How to use tabs on the website.',
+                style: TextStyle(fontSize: 11.5, color: Colors.black54)),
+            const SizedBox(height: 8),
+            TextField(
+                controller: benefits,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Benefits', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
+            TextField(
+                controller: benefitsTa,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'Benefits in Tamil', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
+            TextField(
+                controller: howTo,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'How to use (steps)', border: OutlineInputBorder())),
+            const SizedBox(height: 10),
+            TextField(
+                controller: howToTa,
+                maxLines: 4,
+                decoration: const InputDecoration(labelText: 'How to use in Tamil', border: OutlineInputBorder())),
             const SizedBox(height: 6),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: byWeight,
+              title: const Text('Sell by weight'),
+              subtitle: Text('Website offers 500 g, 1 kg, 5 kg or any amount the customer types. '
+                  'Selling price must be per kg (unit: ${p['unit'] ?? '—'}).'),
+              onChanged: (v) => setSheet(() => byWeight = v),
+            ),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: homemade,
@@ -560,8 +659,159 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
       'web_desc_local': descTa.text.trim(),
       'web_details': details.text.split('\n').map((d) => d.trim()).where((d) => d.isNotEmpty).toList(),
       'web_homemade': homemade,
+      'web_by_weight': byWeight,
+      'web_benefits': _splitLines(benefits.text),
+      'web_benefits_local': _splitLines(benefitsTa.text),
+      'web_howto': _splitLines(howTo.text),
+      'web_howto_local': _splitLines(howToTa.text),
       'web_bestseller': bestseller,
       'web_new': isNew,
     });
+  }
+}
+
+/// "Customer tips" card: count of tips waiting for approval.
+class _TipsCard extends StatefulWidget {
+  @override
+  State<_TipsCard> createState() => _TipsCardState();
+}
+
+class _TipsCardState extends State<_TipsCard> {
+  late final Stream<List<Map<String, dynamic>>> _pending = WebStoreService.instance.watchTips('pending');
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _pending,
+      builder: (context, snap) {
+        final n = snap.data?.length ?? 0;
+        return AppCard(
+          padding: const EdgeInsets.all(14),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TipsScreen())),
+          child: Row(
+            children: [
+              IconBadge(icon: Icons.tips_and_updates_outlined, color: n > 0 ? const Color(0xFFE36A06) : AppTheme.primary, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Customer tips', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                    const SizedBox(height: 2),
+                    Text(n == 0 ? 'No tips waiting' : '$n waiting for your approval',
+                        style: TextStyle(fontSize: 12, color: n > 0 ? const Color(0xFFE36A06) : Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.black38),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Approve or reject tips customers sent from the website.
+class TipsScreen extends StatefulWidget {
+  const TipsScreen({super.key});
+
+  @override
+  State<TipsScreen> createState() => _TipsScreenState();
+}
+
+class _TipsScreenState extends State<TipsScreen> {
+  final _svc = WebStoreService.instance;
+  String _status = 'pending';
+  final _stream = KeyedStream<List<Map<String, dynamic>>>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.scaffold,
+      appBar: AppBar(title: const Text('Customer tips')),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'pending', label: Text('Waiting')),
+                ButtonSegment(value: 'approved', label: Text('Shown')),
+                ButtonSegment(value: 'rejected', label: Text('Hidden')),
+              ],
+              selected: {_status},
+              onSelectionChanged: (v) => setState(() => _status = v.first),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: _stream.get(_status, () => _svc.watchTips(_status)),
+              builder: (context, snap) {
+                if (snap.hasError) return ErrorState(message: 'Could not load tips.\n${snap.error}');
+                if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+                final tips = snap.data!;
+                if (tips.isEmpty) {
+                  return const EmptyState(
+                    icon: Icons.tips_and_updates_outlined,
+                    title: 'Nothing here',
+                    message: 'Customers can share tips on each product\'s How to use tab.',
+                  );
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.all(14),
+                  itemCount: tips.length,
+                  itemBuilder: (context, i) {
+                    final t = tips[i];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: AppCard(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text((t['productName'] ?? '').toString(),
+                                style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                            const SizedBox(height: 6),
+                            Text((t['text'] ?? '').toString(), style: const TextStyle(fontSize: 14, height: 1.4)),
+                            if ((t['name'] ?? '').toString().isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text('— ${t['name']}', style: TextStyle(color: Colors.grey.shade600)),
+                              ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                if (_status != 'rejected')
+                                  TextButton(
+                                    onPressed: () => _svc.setTipStatus(t['id'] as String, 'rejected'),
+                                    child: const Text('Hide'),
+                                  ),
+                                if (_status == 'rejected')
+                                  TextButton(
+                                    onPressed: () => _svc.deleteTip(t['id'] as String),
+                                    style: TextButton.styleFrom(foregroundColor: AppTheme.danger),
+                                    child: const Text('Delete'),
+                                  ),
+                                if (_status != 'approved')
+                                  FilledButton(
+                                    onPressed: () => _svc.setTipStatus(t['id'] as String, 'approved'),
+                                    child: const Text('Show on website'),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
