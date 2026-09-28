@@ -78,6 +78,13 @@ class _WebContentScreenState extends State<WebContentScreen> {
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 32),
             children: [
               _section(
+                icon: Icons.sort,
+                title: 'Product order',
+                summary: 'Customers see: ${_sortLabels[v('defaultSort')] ?? _sortLabels['recommended']} '
+                    '(they can change it on the website)',
+                onTap: () => _sortPicker(v('defaultSort')),
+              ),
+              _section(
                 icon: Icons.title,
                 title: 'Headline',
                 summary: v('heroTitle').isEmpty
@@ -191,6 +198,45 @@ class _WebContentScreenState extends State<WebContentScreen> {
       ),
     );
     return ok == true;
+  }
+
+  // ---------------- Product order ----------------
+
+  static const _sortLabels = {
+    'recommended': 'Recommended (your display order)',
+    'best': 'Best sellers first',
+    'price_asc': 'Price: low to high',
+    'price_desc': 'Price: high to low',
+    'name': 'Name A–Z',
+  };
+
+  Future<void> _sortPicker(String current) async {
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Default product order'),
+        children: [
+          for (final e in _sortLabels.entries)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, e.key),
+              child: Row(children: [
+                Icon(
+                  (current.isEmpty ? 'recommended' : current) == e.key
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  size: 20,
+                  color: AppTheme.primary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Text(e.value)),
+              ]),
+            ),
+        ],
+      ),
+    );
+    if (picked == null) return;
+    await _svc.saveSite({'defaultSort': picked});
+    _saved();
   }
 
   // ---------------- Headline ----------------
