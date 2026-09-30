@@ -35,6 +35,9 @@ const _words = <String, String>{
   'karuppu kavuni': 'கருப்பு கவுனி', 'idli rice': 'இட்லி அரிசி', 'raw rice': 'பச்சரிசி',
   'boiled rice': 'புழுங்கல் அரிசி', 'rice': 'அரிசி', 'arisi': 'அரிசி',
   // Other grains
+  'millet flour': 'சிறுதானிய மாவு', 'millet flours': 'சிறுதானிய மாவு வகைகள்',
+  'whole grains': 'முழு தானியங்கள்', 'whole grain': 'முழு தானியம்',
+  'grains': 'தானியங்கள்', 'grain': 'தானியம்', 'flours': 'மாவு வகைகள்',
   'maize': 'மக்காச்சோளம்', 'corn': 'மக்காச்சோளம்', 'wheat': 'கோதுமை',
   // Cattle feed
   'cattle feed': 'மாட்டுத் தீவனம்', 'feed': 'தீவனம்', 'cotton seed': 'பருத்திக்கொட்டை',

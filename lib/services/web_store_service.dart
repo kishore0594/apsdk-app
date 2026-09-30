@@ -142,6 +142,10 @@ class WebStoreService {
         // The shop's own Tamil name, otherwise an automatic one.
         'nameLocal': tamilNameOf(p),
         'category': categoryOf(p),
+        // Sub-category from Inventory (e.g. "Whole grains", "Flours"):
+        // shown as filter chips inside the category on the website.
+        'subcategory': (p['subcategory'] ?? '').toString().trim(),
+        'subcategoryLocal': autoTamil((p['subcategory'] ?? '').toString()) ?? '',
         'image': (photo != null && photo.isNotEmpty) ? 'fs:${p['id']}:${photoHash(photo)}' : '',
         'inStock': ((p['quantity'] as num?)?.toDouble() ?? 0) > 0,
         'order': (p['web_order'] as num?)?.toInt() ?? 999,

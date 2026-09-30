@@ -126,6 +126,7 @@ class _WebContentScreenState extends State<WebContentScreen> {
                 title: 'Contact and Instagram',
                 summary: [
                   if (v('phone').isNotEmpty) v('phone'),
+                  if (v('email').isNotEmpty) v('email'),
                   if (v('hours').isNotEmpty) v('hours'),
                   if (v('instagram').isNotEmpty) '@${v('instagram')}',
                   if (v('mapUrl').isNotEmpty) 'map link',
@@ -648,8 +649,10 @@ class _WebContentScreenState extends State<WebContentScreen> {
     final hours = TextEditingController(text: s('hours'));
     final hoursTa = TextEditingController(text: s('hoursLocal'));
     final insta = TextEditingController(text: s('instagram'));
+    final email = TextEditingController(text: s('email'));
     if (!await _dialog('Contact and Instagram', [
       _field(phone, 'Phone number for calls', type: TextInputType.phone),
+      _field(email, 'Email address', type: TextInputType.emailAddress, hint: 'orders@yourshop.in'),
       _field(map, 'Google Maps link', hint: 'https://maps.app.goo.gl/...'),
       _field(hours, 'Shop hours', hint: '8 AM – 8 PM, all days'),
       _field(hoursTa, 'Shop hours in Tamil'),
@@ -658,6 +661,7 @@ class _WebContentScreenState extends State<WebContentScreen> {
     final mapUrl = map.text.trim();
     await _svc.saveSite({
       'phone': phone.text.trim(),
+      'email': RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.text.trim()) ? email.text.trim() : '',
       'mapUrl': mapUrl.startsWith('https://') ? mapUrl : '',
       'hours': hours.text.trim(),
       'hoursLocal': hoursTa.text.trim(),
