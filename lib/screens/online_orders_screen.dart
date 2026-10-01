@@ -137,7 +137,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
   Widget _orderCard(Map<String, dynamic> o, Map<String, Map<String, dynamic>> byId,
       Map<String, dynamic> settings) {
     final status = (o['status'] ?? 'requested').toString();
-    final check = WebStoreService.priceCheck(o, byId);
+    final check = WebStoreService.priceCheck(o, byId, WebStoreService.combosById(settings));
     final mismatch = byId.isNotEmpty && check.any((c) => c['ok'] != true);
     final customer = Map<String, dynamic>.from((o['customer'] as Map?) ?? const {});
     final wa = (o['whatsapp_count'] as num?)?.toInt() ?? 0;
@@ -155,7 +155,7 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                   child: Text((customer['name'] ?? '').toString(),
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                 ),
-                Text(formatCurrency((o['total'] as num?) ?? 0),
+                Text(formatCurrency(WebStoreService.orderTotal(o)),
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
               ],
             ),
@@ -243,6 +243,38 @@ class _OrderSheetState extends State<_OrderSheet> {
     });
   }
 
+  Widget _moneyRow(String label, double v, {bool bold = false, bool freeIfZero = false}) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Row(children: [
+          Expanded(child: Text(label, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal))),
+          Text(freeIfZero && v == 0 ? 'Free' : formatCurrency(v),
+              style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.w600, fontSize: bold ? 16 : 14)),
+        ]),
+      );
+
+  Future<void> _changeDelivery() async {
+    final ctrl = TextEditingController(text: WebStoreService.orderDelivery(_o).toStringAsFixed(0));
+    final v = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delivery charge for this order'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(prefixText: '₹ ', helperText: 'e.g. courier cost for this distance; 0 = free'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, double.tryParse(ctrl.text.trim())), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (v == null || v < 0) return;
+    await _svc.setDeliveryCharge(_id, v);
+    if (mounted) setState(() => _o = {..._o, 'delivery_charge_override': v});
+  }
+
   Future<String?> _askLanguage() => showDialog<String>(
         context: context,
         builder: (ctx) => SimpleDialog(
@@ -255,41 +287,68 @@ class _OrderSheetState extends State<_OrderSheet> {
       );
 
   String _message(String lang) {
-    final items = WebStoreService.priceCheck(_o, widget.productsById);
     final ta = lang == 'ta';
     final shop = ((ta ? _store['nameLocal'] : null) ?? _store['name'] ?? 'our shop').toString();
+    final items = ((_o['items'] as List?) ?? const []).map((x) => Map<String, dynamic>.from(x as Map)).toList();
+    final itemsTotal = WebStoreService.orderItemsTotal(_o);
+    final delivery = WebStoreService.orderDelivery(_o);
+    final total = WebStoreService.orderTotal(_o);
+    final pickup = _o['fulfilment'] == 'pickup';
+    final upiId = (_store['upiId'] ?? '').toString();
+    final qtyStr = (num q) => q == q.roundToDouble() ? q.toInt().toString() : q.toString();
     final lines = <String>[
-      ta ? 'வணக்கம் ${_customer['name']},' : 'Hello ${_customer['name']},',
+      ta ? 'வணக்கம் ${_customer['name']} 🙏' : 'Hello ${_customer['name']} 🙏',
+      ta ? '$shop-இல் ஆர்டர் செய்ததற்கு நன்றி!' : 'Thank you for ordering from $shop!',
+      ta ? 'ஆர்டர் ${_o['orderNo']} — உறுதிசெய்யப்பட்டது ✅' : 'Order ${_o['orderNo']} — confirmed ✅',
       '',
-      ta
-          ? '$shop-இல் உங்கள் ஆர்டர் ${_o['orderNo']} உறுதிசெய்யப்பட்டது.'
-          : 'Your order ${_o['orderNo']} with $shop is confirmed.',
+      ta ? '🧾 *பொருட்கள்*' : '🧾 *Items*',
+      for (var k = 0; k < items.length; k++)
+        '${k + 1}. ${items[k]['name']} (${items[k]['pack']}) × ${qtyStr((items[k]['qty'] as num?) ?? 0)} = ${formatCurrency((items[k]['lineTotal'] as num?) ?? 0)}',
       '',
-      for (final i in items)
-        '• ${i['name']} (${i['pack']}) × ${(i['qty'] as double).toStringAsFixed(0)} = ${formatCurrency((i['ordered_price'] as double) * (i['qty'] as double))}',
+      '${ta ? 'பொருட்கள் மொத்தம்' : 'Items total'}: ${formatCurrency(itemsTotal)}',
+      if (!pickup)
+        '${ta ? 'டெலிவரி கட்டணம்' : 'Delivery charge'}: ${delivery == 0 ? (ta ? 'இலவசம்' : 'Free') : formatCurrency(delivery)}',
+      '*${ta ? 'செலுத்த வேண்டிய தொகை' : 'Total to pay'}: ${formatCurrency(total)}*',
       '',
-      '${ta ? 'மொத்தம்' : 'Total'}: ${formatCurrency((_o['total'] as num?) ?? 0)}',
-      if (_o['fulfilment'] == 'pickup')
+      if (pickup) ...[
+        ta ? '🏪 *கடையில் பெற்றுக்கொள்ளவும்*' : '🏪 *Pickup from the shop*',
+        if ((_store['pickupAddress'] ?? '').toString().isNotEmpty) _store['pickupAddress'].toString(),
+      ] else ...[
+        ta ? '📍 *டெலிவரி முகவரி*' : '📍 *Delivery address*',
+        WebStoreService.orderAddress(_customer),
         ta
-            ? 'கடையில் பெற்றுக்கொள்ளவும்${(_store['pickupAddress'] ?? '').toString().isEmpty ? '' : ': ${_store['pickupAddress']}'}'
-            : 'Pickup from the shop${(_store['pickupAddress'] ?? '').toString().isEmpty ? '' : ': ${_store['pickupAddress']}'}'
-      else
-        ta
-            ? 'டெலிவரி: ${_customer['address']} ${_customer['area']}'.trim()
-            : 'Delivery to: ${_customer['address']} ${_customer['area']}'.trim(),
-      if (_o['payment'] == 'upi')
-        ta
-            ? 'UPI மூலம் செலுத்தவும்${(_store['upiId'] ?? '').toString().isEmpty ? '' : ': ${_store['upiId']}'}'
-            : 'Please pay by UPI${(_store['upiId'] ?? '').toString().isEmpty ? '' : ' to ${_store['upiId']}'}'
-      else
-        ta ? 'டெலிவரியின் போது பணம் செலுத்தலாம்.' : 'Payment: cash on delivery.',
+            ? 'இந்த முகவரி சரியா? *ஆம்* என பதில் அனுப்பவும், அல்லது சரியான முகவரியை அனுப்பவும்.'
+            : 'Is this address correct? Please reply *YES*, or send the correct address.',
+      ],
       '',
-      ta ? 'நன்றி!' : 'Thank you!',
+      ta ? '💳 *பணம் செலுத்துதல்*' : '💳 *Payment*',
+      if (_o['payment'] == 'upi') ...[
+        upiId.isEmpty
+            ? (ta ? '${formatCurrency(total)} UPI மூலம் செலுத்தவும்.' : 'Please pay ${formatCurrency(total)} by UPI.')
+            : (ta ? '${formatCurrency(total)} ஐ UPI: $upiId க்கு செலுத்தவும்.' : 'Please pay ${formatCurrency(total)} to UPI: $upiId'),
+        ta
+            ? 'செலுத்திய பின் *பணம் செலுத்திய ஸ்கிரீன்ஷாட்டை* இங்கே அனுப்பவும் — பெற்றதும் உறுதிசெய்வோம்.'
+            : 'After paying, please send the *payment screenshot* here — we will confirm once received.',
+      ] else
+        ta
+            ? 'டெலிவரியின் போது ${formatCurrency(total)} ரொக்கமாக செலுத்தவும்.'
+            : 'Please keep ${formatCurrency(total)} ready to pay in cash on delivery.',
+      '',
+      '— $shop',
     ];
     return lines.join('\n');
   }
 
-  Future<void> _sendWhatsApp() async {
+  String _receiptMessage(String lang) {
+    final ta = lang == 'ta';
+    final shop = ((ta ? _store['nameLocal'] : null) ?? _store['name'] ?? 'our shop').toString();
+    final total = formatCurrency(WebStoreService.orderTotal(_o));
+    return ta
+        ? 'வணக்கம் ${_customer['name']} 🙏\nஆர்டர் ${_o['orderNo']}-க்கு $total பணம் பெற்றுக்கொண்டோம் ✅\nநன்றி!\n— $shop'
+        : 'Hello ${_customer['name']} 🙏\nPayment of $total received for order ${_o['orderNo']} ✅\nThank you!\n— $shop';
+  }
+
+  Future<void> _sendWhatsApp({bool receipt = false}) async {
     final phone = (_customer['phone'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
     if (phone.length != 10) {
       ScaffoldMessenger.of(context)
@@ -298,7 +357,7 @@ class _OrderSheetState extends State<_OrderSheet> {
     }
     final lang = await _askLanguage();
     if (lang == null) return;
-    final url = Uri.parse('https://wa.me/91$phone?text=${Uri.encodeComponent(_message(lang))}');
+    final url = Uri.parse('https://wa.me/91$phone?text=${Uri.encodeComponent(receipt ? _receiptMessage(lang) : _message(lang))}');
     try {
       final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
       if (launched) {
@@ -317,7 +376,7 @@ class _OrderSheetState extends State<_OrderSheet> {
   }
 
   Future<void> _recordSale() async {
-    final check = WebStoreService.priceCheck(_o, widget.productsById);
+    final check = WebStoreService.priceCheck(_o, widget.productsById, WebStoreService.combosById(widget.settings));
     if (check.any((c) => c['product'] == null)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('An item in this order is no longer in Inventory, so it can\'t be recorded automatically.')));
@@ -367,8 +426,9 @@ class _OrderSheetState extends State<_OrderSheet> {
         discount: 0,
         paymentType: credit ? 'CREDIT' : 'CASH',
         vendorId: credit ? result['vendor_id'] as String? : null,
-        paidAmount: credit ? 0 : total,
+        paidAmount: credit ? 0 : total + WebStoreService.orderDelivery(_o),
         notes: 'Web order ${_o['orderNo']}',
+        deliveryCharge: WebStoreService.orderDelivery(_o),
       );
       await _svc.linkSale(_id, saleId, confirm: _status == 'requested');
       if (mounted) {
@@ -391,7 +451,7 @@ class _OrderSheetState extends State<_OrderSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final check = WebStoreService.priceCheck(_o, widget.productsById);
+    final check = WebStoreService.priceCheck(_o, widget.productsById, WebStoreService.combosById(widget.settings));
     final mismatch = widget.productsById.isNotEmpty && check.any((c) => c['ok'] != true);
     final canEdit = UserRole.instance.isAdmin;
     final log = ((_o['whatsapp_log'] as List?) ?? const []).cast<dynamic>().reversed.toList();
@@ -414,19 +474,23 @@ class _OrderSheetState extends State<_OrderSheet> {
           if (_o['fulfilment'] == 'pickup')
             _info(Icons.storefront_outlined, 'Pickup from shop')
           else
-            _info(Icons.local_shipping_outlined, '${_customer['address'] ?? ''} ${_customer['area'] ?? ''}'.trim()),
+            _info(Icons.local_shipping_outlined, WebStoreService.orderAddress(_customer)),
           _info(Icons.payments_outlined, _o['payment'] == 'upi' ? 'UPI' : 'Cash on delivery'),
           if ((_o['note'] ?? '').toString().isNotEmpty) _info(Icons.sticky_note_2_outlined, _o['note'].toString()),
           const Divider(height: 28),
           for (final c in check) _itemRow(c),
           const SizedBox(height: 6),
-          Row(
-            children: [
-              const Expanded(child: Text('Order total', style: TextStyle(fontWeight: FontWeight.bold))),
-              Text(formatCurrency((_o['total'] as num?) ?? 0),
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ],
-          ),
+          _moneyRow('Items', WebStoreService.orderItemsTotal(_o)),
+          if (_o['fulfilment'] != 'pickup')
+            InkWell(
+              onTap: canEdit ? _changeDelivery : null,
+              child: _moneyRow(
+                canEdit ? 'Delivery charge (tap to change)' : 'Delivery charge',
+                WebStoreService.orderDelivery(_o),
+                freeIfZero: true,
+              ),
+            ),
+          _moneyRow('Total to pay', WebStoreService.orderTotal(_o), bold: true),
           if (mismatch)
             Container(
               margin: const EdgeInsets.only(top: 10),
@@ -447,6 +511,13 @@ class _OrderSheetState extends State<_OrderSheet> {
                   backgroundColor: const Color(0xFF128C7E), minimumSize: const Size.fromHeight(48)),
               icon: const Icon(Icons.chat_outlined),
               label: const Text('Send confirmation on WhatsApp'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _sendWhatsApp(receipt: true),
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('Send "payment received" on WhatsApp'),
             ),
             const SizedBox(height: 8),
             if (next != null && _status != 'cancelled')

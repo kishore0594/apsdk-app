@@ -1091,10 +1091,13 @@ class DBHelper {
     String? notes,
     String? saleDate,
     String? dueDate,
+    // Courier / delivery charge for web orders: part of what the customer
+    // pays (and owes, on credit), but not of any product's price.
+    double deliveryCharge = 0,
   }) async {
     final subtotal = items.fold<double>(
         0, (sum, item) => sum + (item['quantity'] as num) * (item['unit_price'] as num));
-    final total = subtotal - discount;
+    final total = subtotal - discount + deliveryCharge;
     final saleRef = _sales.doc();
     final now = saleDate ?? DateTime.now().toIso8601String();
 
@@ -1128,6 +1131,7 @@ class DBHelper {
       'date': now,
       'subtotal': subtotal,
       'discount': discount,
+      if (deliveryCharge > 0) 'delivery_charge': deliveryCharge,
       'total_amount': total,
       'payment_type': paymentType,
       'vendor_id': vendorId,
@@ -1518,8 +1522,9 @@ class DBHelper {
       final m = d.data() as Map<String, dynamic>;
       final total = (m['total_amount'] as num?)?.toDouble() ?? 0;
       final discount = (m['discount'] as num?)?.toDouble() ?? 0;
-      final gross = total + discount;
-      factor[d.id] = gross > 0 ? total / gross : 1;
+      final delivery = (m['delivery_charge'] as num?)?.toDouble() ?? 0;
+      final gross = total - delivery + discount;
+      factor[d.id] = gross > 0 ? (total - delivery) / gross : 1;
     }
     return factor;
   }

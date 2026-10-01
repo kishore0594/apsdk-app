@@ -287,7 +287,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     for (final s in _rawSales) {
       final total = (s['total_amount'] as num?)?.toDouble() ?? 0;
       final discount = (s['discount'] as num?)?.toDouble() ?? 0;
-      saleFactor[s['id'] as String] = (total + discount) > 0 ? total / (total + discount) : 1;
+      final delivery = (s['delivery_charge'] as num?)?.toDouble() ?? 0;
+      saleFactor[s['id'] as String] =
+          (total - delivery + discount) > 0 ? (total - delivery) / (total - delivery + discount) : 1;
     }
     for (final item in _rawSaleItems) {
       if (item['status'] == 'cancelled') continue;

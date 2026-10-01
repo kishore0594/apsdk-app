@@ -5,6 +5,7 @@ import '../utils/formatters.dart';
 import '../utils/keyed_stream.dart';
 import '../utils/user_role.dart';
 import 'web_content_screen.dart';
+import 'combos_screen.dart';
 import '../services/grain_library.dart';
 import '../utils/tamil_names.dart';
 
@@ -96,6 +97,30 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                   _sectionTitle('Categories'),
                   _categoriesCard(products, settings),
                   const SizedBox(height: 18),
+                  AppCard(
+                    padding: const EdgeInsets.all(14),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CombosScreen())),
+                    child: Row(
+                      children: [
+                        const IconBadge(icon: Icons.local_offer_outlined, color: Color(0xFFE36A06), size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Combo offers', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                              const SizedBox(height: 2),
+                              Text('${WebStoreService.combosOf(settings).length} combo(s) · max discount '
+                                  '${WebStoreService.maxComboDiscount(settings).toStringAsFixed(0)}%',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right, color: Colors.black38),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   if (_canEdit) ...[
                     _TipsCard(),
                     const SizedBox(height: 18),
@@ -252,6 +277,11 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
           row('WhatsApp', v('whatsapp')),
           row('UPI ID', v('upiId')),
           row('Minimum order', (store['minOrder'] ?? 0) == 0 ? 'None' : formatCurrency(store['minOrder'] as num)),
+          row('Delivery charge',
+              (store['deliveryCharge'] ?? 0) == 0
+                  ? 'Free'
+                  : '${formatCurrency(store['deliveryCharge'] as num)}'
+                      '${(store['freeDeliveryAbove'] ?? 0) == 0 ? '' : ' · free above ${formatCurrency(store['freeDeliveryAbove'] as num)}'}'),
           row('Delivery areas', areas),
           row('Pickup address', v('pickupAddress')),
           if (_canEdit)
@@ -270,6 +300,8 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
         k: TextEditingController(text: (store[k] ?? '').toString()),
     };
     final minCtrl = TextEditingController(text: ((store['minOrder'] ?? 0) as num).toString());
+    final dcCtrl = TextEditingController(text: ((store['deliveryCharge'] ?? 0) as num).toString());
+    final freeCtrl = TextEditingController(text: ((store['freeDeliveryAbove'] ?? 0) as num).toString());
     final areasCtrl =
         TextEditingController(text: ((store['deliveryAreas'] as List?) ?? const []).join(', '));
     Widget f(String k, String label, {TextInputType? type, String? hint}) => Padding(
@@ -305,6 +337,26 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: TextField(
+                  controller: dcCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                      labelText: 'Delivery charge (₹, 0 = free)',
+                      helperText: 'Shown at checkout; you can change it per order',
+                      border: OutlineInputBorder()),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: TextField(
+                  controller: freeCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                      labelText: 'Free delivery above (₹, 0 = never free)', border: OutlineInputBorder()),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: TextField(
                   controller: areasCtrl,
                   decoration: const InputDecoration(
                       labelText: 'Delivery areas',
@@ -332,6 +384,8 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
         'whatsapp': wa.length == 10 ? '91$wa' : wa,
         'upiId': c['upiId']!.text.trim(),
         'minOrder': double.tryParse(minCtrl.text.trim()) ?? 0,
+        'deliveryCharge': double.tryParse(dcCtrl.text.trim()) ?? 0,
+        'freeDeliveryAbove': double.tryParse(freeCtrl.text.trim()) ?? 0,
         'deliveryAreas': areasCtrl.text
             .split(',')
             .map((a) => a.trim())

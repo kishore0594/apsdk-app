@@ -215,7 +215,90 @@ class WebStoreService {
       // Banners, delivery note, trust lines, owner story, about, contact
       // links and category photos — edited in Web Store > Website content.
       'site': Map<String, dynamic>.from((settings['site'] as Map?) ?? const {}),
+      'combos': [
+        for (final c in combosOf(settings))
+          if (c['active'] != false &&
+              comboProblem(c, {for (final p in products) p['id'] as String: p}, maxComboDiscount(settings)) == null)
+            {
+              'id': (c['id'] ?? '').toString(),
+              'name': (c['name'] ?? '').toString(),
+              'nameLocal': (c['nameLocal'] ?? '').toString().trim().isNotEmpty
+                  ? (c['nameLocal'] as String).trim()
+                  : (autoTamil((c['name'] ?? '').toString()) ?? ''),
+              'price': (c['price'] as num).toDouble(),
+              'normal': comboNormal(c, {for (final p in products) p['id'] as String: p}),
+              'items': [
+                for (final raw in (c['items'] as List))
+                  () {
+                    final i = Map<String, dynamic>.from(raw as Map);
+                    final p = products.firstWhere((x) => x['id'] == i['id']);
+                    final qty = (i['qty'] as num).toDouble();
+                    return {
+                      'id': i['id'],
+                      'qty': qty,
+                      'label': comboItemLabel(p, qty),
+                      'name': (p['name'] ?? '').toString(),
+                      'nameLocal': tamilNameOf(p),
+                    };
+                  }(),
+              ],
+            }
+      ],
     };
+  }
+
+  // ---------------- Combo offers ----------------
+  // Stored in webstore/settings: combos = [{id, name, nameLocal, items:
+  // [{id, qty}], price, active}], maxComboDiscount = percent (default 20).
+
+  static double maxComboDiscount(Map<String, dynamic> settings) =>
+      (settings['maxComboDiscount'] as num?)?.toDouble() ?? 20;
+
+  static List<Map<String, dynamic>> combosOf(Map<String, dynamic> settings) =>
+      ((settings['combos'] as List?) ?? const []).map((c) => Map<String, dynamic>.from(c as Map)).toList();
+
+  static Map<String, Map<String, dynamic>> combosById(Map<String, dynamic> settings) =>
+      {for (final c in combosOf(settings)) (c['id'] ?? '').toString(): c};
+
+  static String _fmtQty(double q) => q == q.roundToDouble() ? q.toInt().toString() : q.toString();
+
+  /// How a combo item reads to customers: "500 g", "2 kg", "1 kg bag", "2 × 1 kg bag".
+  static String comboItemLabel(Map<String, dynamic> p, double qty) {
+    if (sellsByWeight(p)) return qty < 1 ? '${(qty * 1000).round()} g' : '${_fmtQty(qty)} kg';
+    return qty == 1 ? packLabel(p) : '${_fmtQty(qty)} × ${packLabel(p)}';
+  }
+
+  /// Normal (non-combo) total of a combo at today's online prices.
+  static double comboNormal(Map<String, dynamic> combo, Map<String, Map<String, dynamic>> productsById) {
+    var sum = 0.0;
+    for (final raw in (combo['items'] as List? ?? const [])) {
+      final i = Map<String, dynamic>.from(raw as Map);
+      final p = productsById[i['id']];
+      if (p != null) sum += webPriceOf(p) * ((i['qty'] as num?)?.toDouble() ?? 0);
+    }
+    return _r2(sum);
+  }
+
+  /// Why a combo can't be published, or null if it's fine. Enforces the
+  /// shop's maximum discount so a typo can never go live.
+  static String? comboProblem(Map<String, dynamic> combo, Map<String, Map<String, dynamic>> productsById,
+      double maxDiscountPercent) {
+    final items = (combo['items'] as List? ?? const []);
+    if (items.length < 2) return 'Choose at least 2 products';
+    for (final raw in items) {
+      final p = productsById[(raw as Map)['id']];
+      if (p == null) return 'A product in this combo was deleted';
+      if (!isOnline(p)) return '${p['name']} is not on the web store';
+    }
+    final price = (combo['price'] as num?)?.toDouble() ?? 0;
+    final normal = comboNormal(combo, productsById);
+    if (price <= 0) return 'Set a combo price';
+    if (price >= normal) return 'Combo price must be lower than the normal total (${normal.toStringAsFixed(0)})';
+    final discount = (normal - price) / normal * 100;
+    if (discount > maxDiscountPercent + 0.001) {
+      return 'Discount ${discount.toStringAsFixed(1)}% is above your maximum of ${maxDiscountPercent.toStringAsFixed(0)}%';
+    }
+    return null;
   }
 
   static String signatureOf(Map<String, dynamic> catalog) =>
@@ -407,6 +490,24 @@ class WebStoreService {
   Stream<int> watchNewOrderCount() =>
       _orders.where('status', isEqualTo: 'requested').snapshots().map((s) => s.docs.length);
 
+  // Order money: items + delivery charge. The shop can change the charge
+  // per order (courier costs vary by distance) before confirming.
+  static double orderItemsTotal(Map<String, dynamic> o) =>
+      (o['itemsTotal'] as num?)?.toDouble() ?? (o['total'] as num?)?.toDouble() ?? 0;
+  static double orderDelivery(Map<String, dynamic> o) =>
+      (o['delivery_charge_override'] as num?)?.toDouble() ?? (o['deliveryCharge'] as num?)?.toDouble() ?? 0;
+  static double orderTotal(Map<String, dynamic> o) => orderItemsTotal(o) + orderDelivery(o);
+  static String orderAddress(Map<String, dynamic> c) => [
+        c['address'],
+        c['landmark'],
+        c['area'] == 'Other area' ? '' : c['area'],
+        c['city'],
+        (c['pincode'] ?? '').toString().isEmpty ? '' : 'PIN ${c['pincode']}',
+      ].map((x) => (x ?? '').toString().trim()).where((x) => x.isNotEmpty).join(', ');
+
+  Future<void> setDeliveryCharge(String orderId, double amount) =>
+      _write(_orders.doc(orderId).update({'delivery_charge_override': amount}));
+
   Future<void> setOrderStatus(String orderId, String status) => _write(_orders.doc(orderId).update({
         'status': status,
         'status_at': DateTime.now().toIso8601String(),
@@ -431,10 +532,49 @@ class WebStoreService {
   /// today. The website calculates prices in the customer's browser,
   /// so a changed page could send any price — this catches it.
   static List<Map<String, dynamic>> priceCheck(
-      Map<String, dynamic> order, Map<String, Map<String, dynamic>> productsById) {
+      Map<String, dynamic> order, Map<String, Map<String, dynamic>> productsById,
+      [Map<String, Map<String, dynamic>> combosById = const {}]) {
     final out = <Map<String, dynamic>>[];
     for (final raw in (order['items'] as List? ?? const [])) {
       final item = Map<String, dynamic>.from(raw as Map);
+      // A combo line becomes one row per product inside it, each carrying
+      // its fair share of the combo price, so stock and reports stay exact.
+      final parts = (item['combo'] as List?) ?? const [];
+      if (parts.isNotEmpty) {
+        final orderQty = (item['qty'] as num?)?.toDouble() ?? 0;
+        final orderedCombo = (item['price'] as num?)?.toDouble() ?? 0;
+        final combo = combosById[(item['id'] ?? '').toString().replaceFirst('combo:', '')];
+        final currentCombo = (combo?['price'] as num?)?.toDouble();
+        final rows = parts.map((x) => Map<String, dynamic>.from(x as Map)).toList();
+        final normals = [
+          for (final r in rows)
+            (productsById[r['id']] == null ? 0.0 : webPriceOf(productsById[r['id']]!)) *
+                ((r['qty'] as num?)?.toDouble() ?? 0)
+        ];
+        final sumN = normals.fold<double>(0, (a, b) => a + b);
+        for (var k = 0; k < rows.length; k++) {
+          final r = rows[k];
+          final product = productsById[r['id']];
+          final partQty = (r['qty'] as num?)?.toDouble() ?? 0;
+          if (partQty <= 0) continue;
+          final share = sumN > 0 ? normals[k] / sumN : 1 / rows.length;
+          final orderedUnit = _r2(orderedCombo * share / partQty);
+          final currentUnit = (product == null || currentCombo == null) ? null : _r2(currentCombo * share / partQty);
+          out.add({
+            'id': r['id'],
+            'name': '${product?['name'] ?? r['id']} (${item['name']})',
+            'pack': 'combo',
+            'qty': partQty * orderQty,
+            'per_pack': 1.0,
+            'units': partQty * orderQty,
+            'ordered_price': orderedUnit,
+            'current_price': currentUnit,
+            'product': product,
+            'ok': currentUnit != null && (currentUnit - orderedUnit).abs() < 0.5,
+          });
+        }
+        continue;
+      }
       final product = productsById[item['id']];
       final ordered = (item['price'] as num?)?.toDouble() ?? 0;
       final qty = (item['qty'] as num?)?.toDouble() ?? 0;
