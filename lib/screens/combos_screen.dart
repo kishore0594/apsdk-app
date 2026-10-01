@@ -240,7 +240,8 @@ class _ComboEditorState extends State<_ComboEditor> {
         'active': widget.combo?['active'] != false,
       };
 
-  double _step(Map<String, dynamic> p) => WebStoreService.sellsByWeight(p) ? 0.5 : 1;
+  // kg products move in 250 g steps (0.25 kg), e.g. 250 g trial packs.
+  double _step(Map<String, dynamic> p) => WebStoreService.sellsByWeight(p) ? 0.25 : 1;
 
   @override
   Widget build(BuildContext context) {
@@ -356,7 +357,7 @@ class _ComboEditorState extends State<_ComboEditor> {
         child: Row(children: [
           Checkbox(
             value: q > 0,
-            onChanged: (on) => setState(() => on == true ? _qty[id] = 1 : _qty.remove(id)),
+            onChanged: (on) => setState(() => on == true ? _qty[id] = (step < 1 ? 0.25 : 1) : _qty.remove(id)),
           ),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

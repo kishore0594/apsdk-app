@@ -173,20 +173,23 @@ class WebStoreService {
           'pricePerKg': price,
           if (offer > 0 && offer < price) 'offerPerKg': offer,
           'packs': [
-            for (final w in const [(0.5, '500 g'), (1.0, '1 kg'), (5.0, '5 kg')])
+            for (final w in const [(0.25, '250 g'), (0.5, '500 g'), (1.0, '1 kg'), (5.0, '5 kg')])
               {
                 'label': w.$2,
                 'kg': w.$1,
-                'price': _r2(price * w.$1),
-                if (offer > 0 && offer < price) 'offerPrice': _r2(offer * w.$1),
+                // Cards open on 500 g; 250 g is there for small trial packs.
+                if (w.$1 == 0.5) 'isDefault': true,
+                'price': (price * w.$1).roundToDouble(),
+                if (offer > 0 && offer < price && (offer * w.$1).roundToDouble() < (price * w.$1).roundToDouble())
+                  'offerPrice': (offer * w.$1).roundToDouble(),
               }
           ],
         } else
           'packs': [
             {
               'label': packLabel(p),
-              'price': price,
-              if (offer > 0 && offer < price) 'offerPrice': offer,
+              'price': price.roundToDouble(),
+              if (offer > 0 && offer.roundToDouble() < price.roundToDouble()) 'offerPrice': offer.roundToDouble(),
             }
           ],
       });
@@ -225,8 +228,8 @@ class WebStoreService {
               'nameLocal': (c['nameLocal'] ?? '').toString().trim().isNotEmpty
                   ? (c['nameLocal'] as String).trim()
                   : (autoTamil((c['name'] ?? '').toString()) ?? ''),
-              'price': (c['price'] as num).toDouble(),
-              'normal': comboNormal(c, {for (final p in products) p['id'] as String: p}),
+              'price': (c['price'] as num).toDouble().roundToDouble(),
+              'normal': comboNormal(c, {for (final p in products) p['id'] as String: p}).roundToDouble(),
               'items': [
                 for (final raw in (c['items'] as List))
                   () {
@@ -581,7 +584,7 @@ class WebStoreService {
       // Weight items carry kg per pack (e.g. 2.5); others are one app unit.
       final kg = (item['kg'] as num?)?.toDouble();
       final perPack = kg ?? 1.0;
-      final current = product == null ? null : _r2(webPriceOf(product) * perPack);
+      final current = product == null ? null : (webPriceOf(product) * perPack).roundToDouble();
       out.add({
         ...item,
         'qty': qty,
