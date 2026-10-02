@@ -532,6 +532,30 @@ class WebStoreService {
         (c['pincode'] ?? '').toString().isEmpty ? '' : 'PIN ${c['pincode']}',
       ].map((x) => (x ?? '').toString().trim()).where((x) => x.isNotEmpty).join(', ');
 
+  /// Shop checked the customer's payment screenshot. Also updates the
+  /// tracking record, which sends the customer a "Payment received" alert.
+  Future<void> setPaymentVerified(String orderId) async {
+    await _write(_orders.doc(orderId).update({
+      'payment_verified': true,
+      'payment_verified_at': DateTime.now().toIso8601String(),
+    }));
+    await _write(_fs.collection('order_status').doc(orderId).set({
+      'paymentVerified': true,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true)));
+  }
+
+  /// The customer's payment screenshot (data URL), or null.
+  Future<String?> paymentProof(String orderId) async {
+    try {
+      final d = await _fs.collection('payment_proofs').doc(orderId).get().timeout(const Duration(seconds: 10));
+      final v = d.data()?['data'];
+      return v is String && v.startsWith('data:image/') ? v : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> setDeliveryCharge(String orderId, double amount) =>
       _write(_orders.doc(orderId).update({'delivery_charge_override': amount}));
 

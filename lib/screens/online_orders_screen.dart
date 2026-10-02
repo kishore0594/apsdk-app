@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
@@ -179,6 +180,10 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                 _pill(o['fulfilment'] == 'pickup' ? 'Pickup' : 'Delivery', Colors.blueGrey),
                 _pill(o['payment'] == 'upi' ? 'UPI' : 'Cash on delivery', Colors.blueGrey),
                 if (mismatch) _pill('Price check', AppTheme.danger),
+                if (o['payment_verified'] == true)
+                  _pill('Payment verified', AppTheme.profit)
+                else if (o['proof'] == true)
+                  _pill('Payment screenshot', const Color(0xFFE36A06)),
                 if (o['sale_id'] != null) _pill('Sale recorded', AppTheme.profit),
                 if (wa > 0) _pill('WhatsApp ×$wa', const Color(0xFF128C7E)),
               ],
@@ -287,6 +292,58 @@ class _OrderSheetState extends State<_OrderSheet> {
     });
   }
 
+  late final Future<String?> _proof =
+      _o['proof'] == true ? _svc.paymentProof(_id) : Future<String?>.value(null);
+
+  Widget _proofSection(bool canEdit) => FutureBuilder<String?>(
+        future: _proof,
+        builder: (context, snap) {
+          final data = snap.data;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              if (snap.connectionState != ConnectionState.done)
+                const Text('Loading payment screenshot…', style: TextStyle(fontSize: 12.5, color: Colors.black54))
+              else if (data == null)
+                const Text('Payment screenshot not available (check your connection).',
+                    style: TextStyle(fontSize: 12.5, color: Colors.black54))
+              else
+                GestureDetector(
+                  onTap: () => showDialog<void>(
+                    context: context,
+                    builder: (ctx) => Dialog(
+                      insetPadding: const EdgeInsets.all(12),
+                      child: InteractiveViewer(child: Image.memory(base64Decode(data.split(',').last))),
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.memory(base64Decode(data.split(',').last), height: 180, fit: BoxFit.contain),
+                  ),
+                ),
+              if (canEdit && _o['payment_verified'] != true) ...[
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          setState(() => _busy = true);
+                          await _svc.setPaymentVerified(_id);
+                          if (mounted) setState(() {
+                            _busy = false;
+                            _o = {..._o, 'payment_verified': true};
+                          });
+                        },
+                  style: FilledButton.styleFrom(backgroundColor: AppTheme.profit),
+                  icon: const Icon(Icons.verified_outlined),
+                  label: const Text('Payment verified (money received)'),
+                ),
+              ],
+            ]),
+          );
+        },
+      );
+
   Widget _moneyRow(String label, double v, {bool bold = false, bool freeIfZero = false}) => Padding(
         padding: const EdgeInsets.only(bottom: 4),
         child: Row(children: [
@@ -366,7 +423,11 @@ class _OrderSheetState extends State<_OrderSheet> {
       ],
       '',
       ta ? '💳 *பணம் செலுத்துதல்*' : '💳 *Payment*',
-      if (_o['payment'] == 'upi') ...[
+      if (_o['payment_verified'] == true)
+        ta ? '✅ உங்கள் பணம் பெறப்பட்டது. நன்றி!' : '✅ Your payment has been received. Thank you!'
+      else if (_o['proof'] == true)
+        ta ? '✅ பணம் செலுத்திய ஸ்கிரீன்ஷாட் கிடைத்தது.' : '✅ Payment screenshot received.'
+      else if (_o['payment'] == 'upi') ...[
         upiId.isEmpty
             ? (ta ? '${formatCurrency(total)} UPI மூலம் செலுத்தவும்.' : 'Please pay ${formatCurrency(total)} by UPI.')
             : (ta ? '${formatCurrency(total)} ஐ UPI: $upiId க்கு செலுத்தவும்.' : 'Please pay ${formatCurrency(total)} to UPI: $upiId'),
@@ -550,7 +611,12 @@ class _OrderSheetState extends State<_OrderSheet> {
             _info(Icons.storefront_outlined, 'Pickup from shop')
           else
             _info(Icons.local_shipping_outlined, WebStoreService.orderAddress(_customer)),
-          _info(Icons.payments_outlined, _o['payment'] == 'upi' ? 'UPI' : 'Cash on delivery'),
+          _info(Icons.payments_outlined, [
+            _o['payment'] == 'upi' ? 'UPI' : 'Cash on delivery',
+            if ((_o['paymentRef'] ?? '').toString().isNotEmpty) 'Ref ${_o['paymentRef']}',
+            if (_o['payment_verified'] == true) 'verified ✓',
+          ].join(' · ')),
+          if (_o['proof'] == true) _proofSection(canEdit),
           if ((_o['weightKg'] as num?) != null && _o['fulfilment'] != 'pickup')
             _info(Icons.scale_outlined, 'Parcel weight: ${(_o['weightKg'] as num).toString()} kg'),
           if ((_o['note'] ?? '').toString().isNotEmpty) _info(Icons.sticky_note_2_outlined, _o['note'].toString()),
