@@ -6,6 +6,8 @@ import '../utils/keyed_stream.dart';
 import '../utils/user_role.dart';
 import 'web_content_screen.dart';
 import 'combos_screen.dart';
+import 'shipping_screen.dart';
+import 'offer_alerts_screen.dart';
 import '../services/grain_library.dart';
 import '../utils/tamil_names.dart';
 
@@ -120,6 +122,71 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  AppCard(
+                    padding: const EdgeInsets.all(14),
+                    onTap: _canEdit
+                        ? () async {
+                            final store = Map<String, dynamic>.from((settings['store'] as Map?) ?? const {});
+                            final result = await Navigator.push<Map<String, dynamic>>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ShippingScreen(
+                                    shipping: Map<String, dynamic>.from((store['shipping'] as Map?) ?? const {})),
+                              ),
+                            );
+                            if (result == null) return;
+                            await _svc.saveSettings({
+                              'store': {'shipping': result}
+                            });
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                  content: Text('Saved — the website updates in a few seconds')));
+                            }
+                          }
+                        : null,
+                    child: Row(
+                      children: [
+                        const IconBadge(icon: Icons.local_shipping_outlined, color: AppTheme.primary, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Delivery charges', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                              const SizedBox(height: 2),
+                              Text(
+                                (((settings['store'] as Map?)?['shipping'] as Map?)?['enabled'] == true)
+                                    ? 'By pincode zone and parcel weight'
+                                    : 'Flat charge (set zones and weight rates here)',
+                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right, color: Colors.black38),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_canEdit)
+                    AppCard(
+                      padding: const EdgeInsets.all(14),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const OfferAlertsScreen())),
+                      child: Row(children: [
+                        const IconBadge(icon: Icons.notifications_active_outlined, color: Color(0xFFE36A06), size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            const Text('Offer notifications', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                            const SizedBox(height: 2),
+                            Text('Short alerts to customers\' phones — new combos, offers',
+                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                          ]),
+                        ),
+                        const Icon(Icons.chevron_right, color: Colors.black38),
+                      ]),
+                    ),
                   const SizedBox(height: 12),
                   if (_canEdit) ...[
                     _TipsCard(),

@@ -5,6 +5,7 @@ import '../utils/formatters.dart';
 import '../utils/keyed_stream.dart';
 import '../utils/tamil_names.dart';
 import '../utils/user_role.dart';
+import 'offer_alerts_screen.dart';
 
 /// Combo offers for the web store: pick products, set a combo price.
 /// The shop's maximum discount % is enforced here and again at publish.
@@ -150,6 +151,21 @@ class _CombosScreenState extends State<CombosScreen> {
                 ),
             ]),
           ),
+          if (_canEdit && problem == null && c['active'] != false)
+            IconButton(
+              tooltip: 'Notify customers',
+              icon: const Icon(Icons.campaign_outlined, color: AppTheme.primary),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => OfferAlertsScreen(
+                    title: '🌾 New combo: ${(c['name'] ?? '').toString()}',
+                    body: '$contents — only ${formatCurrency(price)}'
+                        '${normal > price ? ' (save ${formatCurrency(normal - price)})' : ''}. Tap to order.',
+                  ),
+                ),
+              ),
+            ),
           Switch(
             value: c['active'] != false,
             onChanged: _canEdit

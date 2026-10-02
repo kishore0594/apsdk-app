@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import '../utils/formatters.dart';
+import 'push_service.dart';
 
 /// Phone notifications for new web store orders: sound, vibration and a
 /// notification-bar alert (native code in MainActivity, "madhura/notify").
@@ -62,6 +64,12 @@ class OrderAlerts {
   }
 
   Future<void> _show(String orderId, String title, String body) async {
+    // With server alerts active, the phone already gets those when the app
+    // is in the background — only alert here while the app is on screen.
+    if (PushService.instance.active &&
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
     HapticFeedback.heavyImpact();
     try {
       await _channel.invokeMethod('show', {

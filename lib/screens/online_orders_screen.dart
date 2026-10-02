@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
@@ -12,6 +13,7 @@ import 'vendors_screen.dart';
 const _statusLabel = {
   'requested': 'New',
   'confirmed': 'Confirmed',
+  'dispatched': 'Dispatched',
   'delivered': 'Delivered',
   'paid': 'Paid',
   'cancelled': 'Cancelled',
@@ -19,12 +21,18 @@ const _statusLabel = {
 const _statusColor = {
   'requested': Color(0xFFE36A06),
   'confirmed': Color(0xFF7C3AED),
+  'dispatched': Color(0xFF0E7490),
   'delivered': Color(0xFF16619A),
   'paid': Color(0xFF1E6F5C),
   'cancelled': Color(0xFF6B7280),
 };
-const _nextStatus = {'requested': 'confirmed', 'confirmed': 'delivered', 'delivered': 'paid'};
-const _nextLabel = {'requested': 'Confirm order', 'confirmed': 'Mark delivered', 'delivered': 'Mark paid'};
+const _nextStatus = {'requested': 'confirmed', 'confirmed': 'dispatched', 'dispatched': 'delivered', 'delivered': 'paid'};
+const _nextLabel = {
+  'requested': 'Confirm order',
+  'confirmed': 'Mark dispatched',
+  'dispatched': 'Mark delivered',
+  'delivered': 'Mark paid',
+};
 
 DateTime? _orderTime(Map<String, dynamic> o) {
   final ts = o['createdAt'];
@@ -219,6 +227,42 @@ class _OrderSheetState extends State<_OrderSheet> {
   Map<String, dynamic> get _store => Map<String, dynamic>.from((widget.settings['store'] as Map?) ?? const {});
 
   Future<void> _setStatus(String s) async {
+    if (s == 'dispatched') {
+      final courier = TextEditingController(text: (_o['courier'] ?? '').toString());
+      final no = TextEditingController(text: (_o['trackingNo'] ?? '').toString());
+      final url = TextEditingController(text: (_o['trackingUrl'] ?? '').toString());
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Mark dispatched'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Courier details show on the customer\'s tracking page. All optional.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.black54)),
+              const SizedBox(height: 10),
+              TextField(controller: courier, decoration: const InputDecoration(labelText: 'Courier / delivery by', hintText: 'DTDC, ST Courier, own delivery…', border: OutlineInputBorder())),
+              const SizedBox(height: 8),
+              TextField(controller: no, decoration: const InputDecoration(labelText: 'Tracking number', border: OutlineInputBorder())),
+              const SizedBox(height: 8),
+              TextField(controller: url, keyboardType: TextInputType.url, decoration: const InputDecoration(labelText: 'Tracking link (https://…)', border: OutlineInputBorder())),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Dispatch')),
+          ],
+        ),
+      );
+      if (go != true) return;
+      setState(() => _busy = true);
+      await _svc.setOrderStatus(_id, s,
+          courier: courier.text.trim(), trackingNo: no.text.trim(), trackingUrl: url.text.trim());
+      if (mounted) setState(() {
+        _busy = false;
+        _o = {..._o, 'status': s, 'courier': courier.text.trim(), 'trackingNo': no.text.trim(), 'trackingUrl': url.text.trim()};
+      });
+      return;
+    }
     if (s == 'cancelled') {
       final ok = await showDialog<bool>(
         context: context,
@@ -334,6 +378,9 @@ class _OrderSheetState extends State<_OrderSheet> {
             ? 'டெலிவரியின் போது ${formatCurrency(total)} ரொக்கமாக செலுத்தவும்.'
             : 'Please keep ${formatCurrency(total)} ready to pay in cash on delivery.',
       '',
+      ta ? '📦 உங்கள் ஆர்டரை கண்காணிக்க:' : '📦 Track your order:',
+      WebStoreService.trackingLink((_o['orderNo'] ?? _id).toString(), Firebase.app().options.projectId),
+      '',
       '— $shop',
     ];
     return lines.join('\n');
@@ -403,6 +450,11 @@ class _OrderSheetState extends State<_OrderSheet> {
         mismatch: mismatch,
         appTotal: appTotal,
         orderTotal: orderTotal,
+        customerName: (_customer['name'] ?? '').toString(),
+        customerPhone: phone,
+        customerPlace: [_customer['city'], _customer['area']]
+            .map((x) => (x ?? '').toString().trim())
+            .firstWhere((x) => x.isNotEmpty && x != 'Other area', orElse: () => ''),
       ),
     );
     if (result == null) return;
@@ -410,6 +462,25 @@ class _OrderSheetState extends State<_OrderSheet> {
     try {
       final useApp = result['use_app_prices'] == true;
       final credit = result['payment'] == 'CREDIT';
+      var vendorId = result['vendor_id'] as String?;
+      if (result['save_customer'] == true && vendorId == null) {
+        // New customer from the website: saved to Vendors with the order's
+        // name, phone and town, exactly like adding one by hand.
+        final place = (result['place'] ?? '').toString();
+        vendorId = await DBHelper.instance.insertVendor({
+          'name': (_customer['name'] ?? 'Web customer').toString().trim(),
+          'phone': phone,
+          'address': place,
+          'opening_balance': 0,
+          'created_at': DateTime.now().toIso8601String(),
+          'source': 'web',
+        });
+        if (place.isNotEmpty) {
+          try {
+            await DBHelper.instance.addVendorPlace(place);
+          } catch (_) {/* place list is a convenience only */}
+        }
+      }
       final total = useApp ? appTotal : orderTotal;
       final saleId = await DBHelper.instance.createSale(
         items: [
@@ -425,7 +496,8 @@ class _OrderSheetState extends State<_OrderSheet> {
         ],
         discount: 0,
         paymentType: credit ? 'CREDIT' : 'CASH',
-        vendorId: credit ? result['vendor_id'] as String? : null,
+        // Linked for paid sales too, so the sale shows in the customer's history.
+        vendorId: vendorId,
         paidAmount: credit ? 0 : total + WebStoreService.orderDelivery(_o),
         notes: 'Web order ${_o['orderNo']}',
         deliveryCharge: WebStoreService.orderDelivery(_o),
@@ -455,7 +527,10 @@ class _OrderSheetState extends State<_OrderSheet> {
     final mismatch = widget.productsById.isNotEmpty && check.any((c) => c['ok'] != true);
     final canEdit = UserRole.instance.isAdmin;
     final log = ((_o['whatsapp_log'] as List?) ?? const []).cast<dynamic>().reversed.toList();
-    final next = _nextStatus[_status];
+    // Pickup orders skip "Dispatched".
+    final next = (_nextStatus[_status] == 'dispatched' && _o['fulfilment'] == 'pickup')
+        ? 'delivered'
+        : _nextStatus[_status];
     return DraggableScrollableSheet(
       expand: false,
       initialChildSize: 0.85,
@@ -476,6 +551,8 @@ class _OrderSheetState extends State<_OrderSheet> {
           else
             _info(Icons.local_shipping_outlined, WebStoreService.orderAddress(_customer)),
           _info(Icons.payments_outlined, _o['payment'] == 'upi' ? 'UPI' : 'Cash on delivery'),
+          if ((_o['weightKg'] as num?) != null && _o['fulfilment'] != 'pickup')
+            _info(Icons.scale_outlined, 'Parcel weight: ${(_o['weightKg'] as num).toString()} kg'),
           if ((_o['note'] ?? '').toString().isNotEmpty) _info(Icons.sticky_note_2_outlined, _o['note'].toString()),
           const Divider(height: 28),
           for (final c in check) _itemRow(c),
@@ -524,7 +601,7 @@ class _OrderSheetState extends State<_OrderSheet> {
               OutlinedButton(
                 onPressed: _busy ? null : () => _setStatus(next),
                 style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
-                child: Text(_nextLabel[_status]!),
+                child: Text(next == 'delivered' && _status == 'confirmed' ? 'Mark picked up' : _nextLabel[_status]!),
               ),
             if (_o['sale_id'] == null && _status != 'cancelled') ...[
               const SizedBox(height: 8),
@@ -612,12 +689,18 @@ class _RecordSaleDialog extends StatefulWidget {
   final bool mismatch;
   final double appTotal;
   final double orderTotal;
+  final String customerName;
+  final String customerPhone;
+  final String customerPlace;
   const _RecordSaleDialog({
     required this.vendors,
     required this.suggestedVendorId,
     required this.mismatch,
     required this.appTotal,
     required this.orderTotal,
+    required this.customerName,
+    required this.customerPhone,
+    required this.customerPlace,
   });
 
   @override
@@ -629,9 +712,13 @@ class _RecordSaleDialogState extends State<_RecordSaleDialog> {
   late String? _vendorId = widget.suggestedVendorId;
   late List<Map<String, dynamic>> _vendors = widget.vendors;
   bool _useAppPrices = true;
+  // New web customers are saved to Vendors unless the shop switches it off.
+  late bool _saveCustomer = widget.suggestedVendorId == null;
 
   @override
   Widget build(BuildContext context) {
+    final isNew = widget.suggestedVendorId == null;
+    final usingNew = isNew && _saveCustomer && (_payment == 'CASH' || _vendorId == null);
     return AlertDialog(
       title: const Text('Record as sale'),
       content: SingleChildScrollView(
@@ -673,7 +760,27 @@ class _RecordSaleDialogState extends State<_RecordSaleDialog> {
               title: const Text('On credit to a vendor'),
               onChanged: (v) => setState(() => _payment = v!),
             ),
-            if (_payment == 'CREDIT') ...[
+            if (isNew)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _saveCustomer,
+                title: Text('Save ${widget.customerName.isEmpty ? 'customer' : widget.customerName} to Vendors'),
+                subtitle: Text([
+                  widget.customerPhone,
+                  if (widget.customerPlace.isNotEmpty) widget.customerPlace,
+                ].join(' · ')),
+                onChanged: (v) => setState(() {
+                  _saveCustomer = v;
+                  if (v) _vendorId = null;
+                }),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.only(bottom: 4),
+                child: Text('Already in Vendors — matched by phone number.',
+                    style: TextStyle(fontSize: 12, color: AppTheme.profit)),
+              ),
+            if (_payment == 'CREDIT' && !usingNew) ...[
               DropdownButtonFormField<String>(
                 value: _vendors.any((v) => v['id'] == _vendorId) ? _vendorId : null,
                 isExpanded: true,
@@ -710,11 +817,13 @@ class _RecordSaleDialogState extends State<_RecordSaleDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
-          onPressed: (_payment == 'CREDIT' && _vendorId == null)
+          onPressed: (_payment == 'CREDIT' && _vendorId == null && !usingNew)
               ? null
               : () => Navigator.pop(context, {
                     'payment': _payment,
-                    'vendor_id': _vendorId,
+                    'vendor_id': usingNew ? null : _vendorId,
+                    'save_customer': usingNew,
+                    'place': widget.customerPlace,
                     'use_app_prices': !widget.mismatch || _useAppPrices,
                   }),
           child: const Text('Record sale'),

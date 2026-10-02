@@ -13,6 +13,7 @@ import 'utils/user_role.dart';
 import 'utils/session_lock.dart';
 import 'services/web_store_service.dart';
 import 'services/order_alerts.dart';
+import 'services/push_service.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
@@ -243,6 +244,7 @@ class _RootNavState extends State<RootNav> {
     // New-order phone notifications for anyone allowed to see orders.
     if (!UserRole.instance.isPending) {
       OrderAlerts.instance.start();
+      PushService.instance.start(); // order alerts even when the app is closed
     } else {
       OrderAlerts.instance.stop();
     }

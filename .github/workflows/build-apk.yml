@@ -163,6 +163,18 @@ jobs:
                       .setMethodCallHandler { call, result ->
                           when (call.method) {
                               "permission" -> {
+                                  // Create the loud "New orders" channel up front, so alerts sent by
+                                  // the server (app closed) use it too.
+                                  if (Build.VERSION.SDK_INT >= 26) {
+                                      val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                                      if (nm.getNotificationChannel("orders") == null) {
+                                          val ch = NotificationChannel("orders", "New orders", NotificationManager.IMPORTANCE_HIGH)
+                                          ch.description = "New web store orders"
+                                          ch.enableVibration(true)
+                                          ch.vibrationPattern = longArrayOf(0, 400, 200, 400)
+                                          nm.createNotificationChannel(ch)
+                                      }
+                                  }
                                   if (Build.VERSION.SDK_INT >= 33 &&
                                       checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
                                   ) {

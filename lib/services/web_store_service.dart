@@ -230,6 +230,7 @@ class WebStoreService {
                   : (autoTamil((c['name'] ?? '').toString()) ?? ''),
               'price': (c['price'] as num).toDouble().roundToDouble(),
               'normal': comboNormal(c, {for (final p in products) p['id'] as String: p}).roundToDouble(),
+              'weightKg': comboWeightKg(c, {for (final p in products) p['id'] as String: p}),
               'items': [
                 for (final raw in (c['items'] as List))
                   () {
@@ -269,6 +270,29 @@ class WebStoreService {
   static String comboItemLabel(Map<String, dynamic> p, double qty) {
     if (sellsByWeight(p)) return qty < 1 ? '${(qty * 1000).round()} g' : '${_fmtQty(qty)} kg';
     return qty == 1 ? packLabel(p) : '${_fmtQty(qty)} × ${packLabel(p)}';
+  }
+
+  /// Kilograms in a pack label like "25 kg bag" or "500 g"; 0 if none.
+  static double kgInLabel(String label) {
+    final m = RegExp(r'(\d+(?:\.\d+)?)\s*(kg|kgs|kilo|kilos|g|gm|gms|gram|grams)\b', caseSensitive: false)
+        .firstMatch(label);
+    if (m == null) return 0;
+    final n = double.tryParse(m.group(1)!) ?? 0;
+    return m.group(2)!.toLowerCase().startsWith('k') ? n : n / 1000;
+  }
+
+  /// Parcel weight of a combo (for weight-based delivery charges).
+  static double comboWeightKg(Map<String, dynamic> combo, Map<String, Map<String, dynamic>> productsById) {
+    var kg = 0.0;
+    for (final raw in (combo['items'] as List? ?? const [])) {
+      final i = Map<String, dynamic>.from(raw as Map);
+      final p = productsById[i['id']];
+      final q = (i['qty'] as num?)?.toDouble() ?? 0;
+      if (p == null) continue;
+      final perUnit = sellsByWeight(p) ? 1.0 : (kgInLabel(packLabel(p)) > 0 ? kgInLabel(packLabel(p)) : 1.0);
+      kg += q * perUnit;
+    }
+    return (kg * 1000).roundToDouble() / 1000;
   }
 
   /// Normal (non-combo) total of a combo at today's online prices.
@@ -481,7 +505,7 @@ class WebStoreService {
 
   // ---------------- Orders from the web store ----------------
 
-  static const statuses = ['requested', 'confirmed', 'delivered', 'paid', 'cancelled'];
+  static const statuses = ['requested', 'confirmed', 'dispatched', 'delivered', 'paid', 'cancelled'];
 
   Stream<List<Map<String, dynamic>>> watchOrders() => _orders
       .orderBy('createdAt', descending: true)
@@ -511,10 +535,30 @@ class WebStoreService {
   Future<void> setDeliveryCharge(String orderId, double amount) =>
       _write(_orders.doc(orderId).update({'delivery_charge_override': amount}));
 
-  Future<void> setOrderStatus(String orderId, String status) => _write(_orders.doc(orderId).update({
-        'status': status,
-        'status_at': DateTime.now().toIso8601String(),
-      }));
+  /// Moves an order on, and updates the customer's public tracking page
+  /// (order_status: status, times and courier details — nothing personal).
+  Future<void> setOrderStatus(String orderId, String status,
+      {String courier = '', String trackingNo = '', String trackingUrl = ''}) async {
+    final courierFields = {
+      if (courier.isNotEmpty) 'courier': courier,
+      if (trackingNo.isNotEmpty) 'trackingNo': trackingNo,
+      if (trackingUrl.startsWith('https://')) 'trackingUrl': trackingUrl,
+    };
+    await _write(_orders.doc(orderId).update({
+      'status': status,
+      'status_at': DateTime.now().toIso8601String(),
+      ...courierFields,
+    }));
+    await _write(_fs.collection('order_status').doc(orderId).set({
+      'status': status,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'history': {status: FieldValue.serverTimestamp()},
+      ...courierFields,
+    }, SetOptions(merge: true)));
+  }
+
+  /// Public tracking link for an order, e.g. https://<project>.web.app/?track=SMA-1001-AB12
+  static String trackingLink(String orderNo, String projectId) => 'https://$projectId.web.app/?track=$orderNo';
 
   /// One WhatsApp confirmation sent — kept as a count plus a history.
   Future<void> logOrderWhatsApp(String orderId, String language) => _write(_orders.doc(orderId).update({

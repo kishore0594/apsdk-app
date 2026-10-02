@@ -467,6 +467,24 @@ class _ProductFormState extends State<_ProductForm> {
   }
 
   Future<void> _delete() async {
+    final name = (widget.product!['name'] ?? 'this product').toString();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete $name?'),
+        content: const Text('It is removed from Inventory and the web store for good. Past sales keep their records. '
+            'To just stop selling it online, switch it off in Web Store instead.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
     await _db.deleteProduct(widget.product!['id'] as String);
     if (mounted) Navigator.pop(context, true);
   }
