@@ -8,6 +8,7 @@ import 'web_content_screen.dart';
 import 'combos_screen.dart';
 import 'shipping_screen.dart';
 import 'offer_alerts_screen.dart';
+import 'feedback_screen.dart';
 import '../services/grain_library.dart';
 import '../utils/tamil_names.dart';
 
@@ -189,6 +190,10 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                     ),
                   const SizedBox(height: 12),
                   if (_canEdit) ...[
+                    _FeedbackCard(),
+                    const SizedBox(height: 12),
+                    _ReviewsCard(),
+                    const SizedBox(height: 12),
                     _TipsCard(),
                     const SizedBox(height: 18),
                   ],
@@ -962,6 +967,178 @@ class _TipsScreenState extends State<TipsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "Customer reviews" card: reviews waiting for approval.
+class _ReviewsCard extends StatefulWidget {
+  @override
+  State<_ReviewsCard> createState() => _ReviewsCardState();
+}
+
+class _ReviewsCardState extends State<_ReviewsCard> {
+  late final Stream<List<Map<String, dynamic>>> _pending = WebStoreService.instance.watchReviews('pending');
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _pending,
+      builder: (context, snap) {
+        final n = snap.data?.length ?? 0;
+        return AppCard(
+          padding: const EdgeInsets.all(14),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReviewsScreen())),
+          child: Row(children: [
+            IconBadge(icon: Icons.star_outline, color: n > 0 ? const Color(0xFFE36A06) : AppTheme.primary, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Customer reviews', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                const SizedBox(height: 2),
+                Text(n == 0 ? 'No reviews waiting' : '$n waiting for your approval',
+                    style: TextStyle(fontSize: 12, color: n > 0 ? const Color(0xFFE36A06) : Colors.grey.shade600)),
+              ]),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.black38),
+          ]),
+        );
+      },
+    );
+  }
+}
+
+/// Approve or hide product reviews from delivered orders.
+class ReviewsScreen extends StatefulWidget {
+  const ReviewsScreen({super.key});
+
+  @override
+  State<ReviewsScreen> createState() => _ReviewsScreenState();
+}
+
+class _ReviewsScreenState extends State<ReviewsScreen> {
+  final _svc = WebStoreService.instance;
+  String _status = 'pending';
+  final _stream = KeyedStream<List<Map<String, dynamic>>>();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppTheme.scaffold,
+      appBar: AppBar(title: const Text('Customer reviews')),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+          child: SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'pending', label: Text('Waiting')),
+              ButtonSegment(value: 'approved', label: Text('Shown')),
+              ButtonSegment(value: 'hidden', label: Text('Hidden')),
+            ],
+            selected: {_status},
+            onSelectionChanged: (v) => setState(() => _status = v.first),
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: _stream.get(_status, () => _svc.watchReviews(_status)),
+            builder: (context, snap) {
+              if (snap.hasError) return ErrorState(message: 'Could not load reviews.\n${snap.error}');
+              if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+              final list = snap.data!;
+              if (list.isEmpty) {
+                return const EmptyState(
+                  icon: Icons.star_outline,
+                  title: 'Nothing here',
+                  message: 'Customers can rate products on their tracking page after delivery.',
+                );
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.all(14),
+                itemCount: list.length,
+                itemBuilder: (context, i) {
+                  final r = list[i];
+                  final stars = (r['stars'] as num?)?.toInt() ?? 0;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: AppCard(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text((r['productName'] ?? '').toString(),
+                            style: const TextStyle(fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                        const SizedBox(height: 4),
+                        Text('${'★' * stars}${'☆' * (5 - stars)}',
+                            style: const TextStyle(fontSize: 18, color: Color(0xFFE0A11B))),
+                        if ((r['text'] ?? '').toString().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(r['text'].toString(), style: const TextStyle(fontSize: 14, height: 1.4)),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                              '— ${(r['name'] ?? '').toString().isEmpty ? 'Customer' : r['name']} · order ${r['orderNo'] ?? ''}',
+                              style: TextStyle(color: Colors.grey.shade600, fontSize: 12.5)),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                          if (_status != 'hidden')
+                            TextButton(
+                              onPressed: () => _svc.setReviewStatus(r['id'] as String, 'hidden'),
+                              child: const Text('Hide'),
+                            ),
+                          if (_status != 'approved')
+                            FilledButton(
+                              onPressed: () => _svc.setReviewStatus(r['id'] as String, 'approved'),
+                              child: const Text('Show on website'),
+                            ),
+                        ]),
+                      ]),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// "Customer feedback" card: new messages and "looking for" requests.
+class _FeedbackCard extends StatefulWidget {
+  @override
+  State<_FeedbackCard> createState() => _FeedbackCardState();
+}
+
+class _FeedbackCardState extends State<_FeedbackCard> {
+  late final Stream<List<Map<String, dynamic>>> _stream = watchFeedback();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: _stream,
+      builder: (context, snap) {
+        final n = (snap.data ?? const []).where((f) => f['done'] != true).length;
+        return AppCard(
+          padding: const EdgeInsets.all(14),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const FeedbackScreen())),
+          child: Row(children: [
+            IconBadge(icon: Icons.forum_outlined, color: n > 0 ? const Color(0xFFE36A06) : AppTheme.primary, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Customer feedback', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                const SizedBox(height: 2),
+                Text(n == 0 ? 'No new messages' : '$n new message${n == 1 ? '' : 's'} — feedback and product requests',
+                    style: TextStyle(fontSize: 12, color: n > 0 ? const Color(0xFFE36A06) : Colors.grey.shade600)),
+              ]),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.black38),
+          ]),
+        );
+      },
     );
   }
 }

@@ -180,6 +180,8 @@ class _OnlineOrdersScreenState extends State<OnlineOrdersScreen> {
                 _pill(o['fulfilment'] == 'pickup' ? 'Pickup' : 'Delivery', Colors.blueGrey),
                 _pill(o['payment'] == 'upi' ? 'UPI' : 'Cash on delivery', Colors.blueGrey),
                 if (mismatch) _pill('Price check', AppTheme.danger),
+                if (o['payVia'] == 'whatsapp' && o['payment_verified'] != true)
+                  _pill('Pays on WhatsApp', const Color(0xFF128C7E)),
                 if (o['payment_verified'] == true)
                   _pill('Payment verified', AppTheme.profit)
                 else if (o['proof'] == true)

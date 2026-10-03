@@ -119,7 +119,8 @@ class WebStoreService {
       ((v as List?) ?? const []).map((d) => d.toString().trim()).where((d) => d.isNotEmpty).toList();
 
   static Map<String, dynamic> buildCatalog(List<Map<String, dynamic>> products, Map<String, dynamic> settings,
-      [Map<String, List<Map<String, dynamic>>> approvedTips = const {}]) {
+      [Map<String, List<Map<String, dynamic>>> approvedTips = const {},
+      Map<String, List<Map<String, dynamic>>> approvedReviews = const {}]) {
     final items = <Map<String, dynamic>>[];
     for (final p in products.where(isOnline)) {
       final price = priceOf(p);
@@ -160,6 +161,20 @@ class WebStoreService {
         'benefitsLocal': own('web_benefits_local', lib?.benefitsTa),
         'howTo': own('web_howto', lib?.howTo),
         'howToLocal': own('web_howto_local', lib?.howToTa),
+        if ((approvedReviews[p['id']] ?? const []).isNotEmpty) ...{
+          'rating': {
+            'avg': (approvedReviews[p['id']]!.fold<double>(0, (a, r) => a + ((r['stars'] as num?)?.toDouble() ?? 0)) /
+                    approvedReviews[p['id']]!.length *
+                    10)
+                .roundToDouble() /
+                10,
+            'count': approvedReviews[p['id']]!.length,
+          },
+          'reviews': [
+            for (final r in approvedReviews[p['id']]!.take(10))
+              {'name': (r['name'] ?? '').toString(), 'stars': (r['stars'] as num?)?.toInt() ?? 0, 'text': (r['text'] ?? '').toString()}
+          ],
+        },
         'tips': [
           for (final t in (approvedTips[p['id']] ?? const <Map<String, dynamic>>[]).take(20))
             {'name': (t['name'] ?? '').toString(), 'text': (t['text'] ?? '').toString()}
@@ -349,6 +364,9 @@ class WebStoreService {
 
   StreamSubscription? _productsSub, _settingsSub, _catalogSub, _tipsSub;
   Map<String, List<Map<String, dynamic>>> _approvedTips = const {};
+  Map<String, List<Map<String, dynamic>>> _approvedReviews = const {};
+  StreamSubscription? _reviewsSub;
+  bool _reviewsSeen = false;
   bool _tipsSeen = false;
   List<Map<String, dynamic>>? _latestProducts;
   Map<String, dynamic>? _latestSettings;
@@ -385,6 +403,22 @@ class WebStoreService {
       _tipsSeen = true; // publish without tips rather than not at all
       _schedule();
     });
+    _reviewsSub = _fs.collection('reviews').where('status', isEqualTo: 'approved').snapshots().listen((snap) {
+      final byProduct = <String, List<Map<String, dynamic>>>{};
+      final docs = [...snap.docs]..sort((a, b) =>
+          (b.data()['approved_at'] ?? '').toString().compareTo((a.data()['approved_at'] ?? '').toString()));
+      for (final d in docs) {
+        final pid = (d.data()['productId'] ?? '').toString();
+        if (pid.isNotEmpty) byProduct.putIfAbsent(pid, () => []).add(d.data());
+      }
+      _approvedReviews = byProduct;
+      _reviewsSeen = true;
+      _schedule();
+    }, onError: (Object e) {
+      debugPrint('Reviews watch error: $e');
+      _reviewsSeen = true;
+      _schedule();
+    });
     _settingsSub = watchSettings().listen((s) {
       _latestSettings = s;
       _schedule();
@@ -397,6 +431,9 @@ class WebStoreService {
     _settingsSub?.cancel();
     _catalogSub?.cancel();
     _tipsSub?.cancel();
+    _reviewsSub?.cancel();
+    _reviewsSub = null;
+    _reviewsSeen = false;
     _productsSub = _settingsSub = _catalogSub = _tipsSub = null;
     _tipsSeen = false;
     _catalogSeen = false;
@@ -405,8 +442,8 @@ class WebStoreService {
 
   void _schedule() {
     final products = _latestProducts, settings = _latestSettings;
-    if (products == null || settings == null || !_catalogSeen || !_tipsSeen) return;
-    final sig = signatureOf(buildCatalog(products, settings, _approvedTips));
+    if (products == null || settings == null || !_catalogSeen || !_tipsSeen || !_reviewsSeen) return;
+    final sig = signatureOf(buildCatalog(products, settings, _approvedTips, _approvedReviews));
     if (sig == _liveSig) {
       if (!_publishing) sync.value = WebSyncState.upToDate;
       return;
@@ -426,7 +463,7 @@ class WebStoreService {
     _publishing = true;
     sync.value = WebSyncState.publishing;
     try {
-      await _publish(products, settings, _approvedTips);
+      await _publish(products, settings, _approvedTips, _approvedReviews);
       lastError = null;
       sync.value = WebSyncState.upToDate;
     } catch (e) {
@@ -442,8 +479,8 @@ class WebStoreService {
   }
 
   Future<void> _publish(List<Map<String, dynamic>> products, Map<String, dynamic> settings,
-      Map<String, List<Map<String, dynamic>>> tips) async {
-    final catalog = buildCatalog(products, settings, tips);
+      Map<String, List<Map<String, dynamic>>> tips, Map<String, List<Map<String, dynamic>>> reviews) async {
+    final catalog = buildCatalog(products, settings, tips, reviews);
     final sig = signatureOf(catalog);
 
     // Photos first, so the website never points at a photo not yet there.
@@ -489,6 +526,18 @@ class WebStoreService {
   }
 
   Future<void> saveSite(Map<String, dynamic> patch) => saveSettings({'site': patch});
+
+  // ---------------- Product reviews ----------------
+  Stream<List<Map<String, dynamic>>> watchReviews(String status) => _fs
+      .collection('reviews')
+      .where('status', isEqualTo: status)
+      .snapshots()
+      .map((s) => s.docs.map((d) => <String, dynamic>{...d.data(), 'id': d.id}).toList());
+
+  Future<void> setReviewStatus(String id, String status) => _write(_fs.collection('reviews').doc(id).update({
+        'status': status,
+        if (status == 'approved') 'approved_at': DateTime.now().toIso8601String(),
+      }));
 
   // ---------------- Customer tips ----------------
   // Customers suggest tips on the website ("pending"); only approved

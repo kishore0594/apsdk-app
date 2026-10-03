@@ -134,6 +134,14 @@ class _WebContentScreenState extends State<WebContentScreen> {
                 onTap: () => _contactEditor(site),
               ),
               _section(
+                icon: Icons.qr_code_2,
+                title: 'Payment QR code',
+                summary: v('payQr').isEmpty
+                    ? 'Not added — customers can still pay to your UPI ID'
+                    : 'Shown at checkout so customers can scan and pay',
+                onTap: () => _payQrEditor(v('payQr')),
+              ),
+              _section(
                 icon: Icons.photo_library_outlined,
                 title: 'Category photos',
                 summary: '${catImages.length} of ${widget.categories.length} categories have a photo',
@@ -238,6 +246,42 @@ class _WebContentScreenState extends State<WebContentScreen> {
     if (picked == null) return;
     await _svc.saveSite({'defaultSort': picked});
     _saved();
+  }
+
+  // ---------------- Payment QR ----------------
+  // Your UPI QR (e.g. from GPay for Business → QR code → save/screenshot).
+  // Scanning works even when payment links are blocked by Google Pay.
+  Future<void> _payQrEditor(String current) async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Payment QR code'),
+        content: const Text(
+            'Add your shop\'s UPI QR — from GPay for Business, PhonePe Business or Paytm for Business, '
+            'save or screenshot the QR, then choose it here. Crop it so only the QR shows.'),
+        actions: [
+          if (current.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'remove'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.danger),
+              child: const Text('Remove'),
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'pick'), child: Text(current.isEmpty ? 'Choose QR' : 'Replace QR')),
+        ],
+      ),
+    );
+    if (action == 'remove') {
+      await _svc.deleteSiteImage(current);
+      await _svc.saveSite({'payQr': ''});
+      _saved();
+    } else if (action == 'pick') {
+      final ref = await _pickPhoto('site_payqr_${DateTime.now().millisecondsSinceEpoch}', maxWidth: 900);
+      if (ref == null) return;
+      await _svc.deleteSiteImage(current);
+      await _svc.saveSite({'payQr': ref});
+      _saved();
+    }
   }
 
   // ---------------- Headline ----------------
