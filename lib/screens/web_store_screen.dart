@@ -9,6 +9,7 @@ import 'combos_screen.dart';
 import 'shipping_screen.dart';
 import 'offer_alerts_screen.dart';
 import 'feedback_screen.dart';
+import 'recipes_screen.dart';
 import '../services/grain_library.dart';
 import '../utils/tamil_names.dart';
 
@@ -168,6 +169,34 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                         const Icon(Icons.chevron_right, color: Colors.black38),
                       ],
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  AppCard(
+                    padding: const EdgeInsets.all(14),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecipesScreen())),
+                    child: Row(children: [
+                      const IconBadge(icon: Icons.restaurant_menu, color: Color(0xFFE36A06), size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Text("Recipes · Today's recipe", style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                          const SizedBox(height: 2),
+                          Text(
+                            () {
+                              final rs = WebStoreService.recipesOf(settings);
+                              final today = rs.where((r) => r['id'] == settings['todayRecipe']).map((r) => r['name']).firstOrNull;
+                              return rs.isEmpty
+                                  ? 'Add recipes — customers can add the ingredients to their cart'
+                                  : today == null
+                                      ? '${rs.length} recipes · choose today\'s recipe'
+                                      : 'Today: $today · ${rs.length} recipes';
+                            }(),
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                          ),
+                        ]),
+                      ),
+                      const Icon(Icons.chevron_right, color: Colors.black38),
+                    ]),
                   ),
                   const SizedBox(height: 12),
                   if (_canEdit)

@@ -134,6 +134,25 @@ class _WebContentScreenState extends State<WebContentScreen> {
                 onTap: () => _contactEditor(site),
               ),
               _section(
+                icon: Icons.panorama_outlined,
+                title: 'Hero photo (top of the home page)',
+                summary: v('heroImage').isEmpty
+                    ? 'Not added — a wide, bright photo of your grains works best'
+                    : 'Shown behind the headline at the top of the website',
+                onTap: () => _photoSetting('heroImage', 'Hero photo',
+                    'A wide (landscape), bright photo of your products — bowls or sacks of millets and grains. '
+                    'Keep the left side simple: the headline sits there.', 1600),
+              ),
+              _section(
+                icon: Icons.storefront_outlined,
+                title: 'Shop photo (Visit our store)',
+                summary: v('storePhoto').isEmpty
+                    ? 'Not added — a photo of your shop front builds trust'
+                    : 'Shown in "Visit our store" with hours and directions',
+                onTap: () => _photoSetting('storePhoto', 'Shop photo',
+                    'A clear daytime photo of your shop front, with the name board visible if possible.', 1200),
+              ),
+              _section(
                 icon: Icons.qr_code_2,
                 title: 'Payment QR code',
                 summary: v('payQr').isEmpty
@@ -246,6 +265,41 @@ class _WebContentScreenState extends State<WebContentScreen> {
     if (picked == null) return;
     await _svc.saveSite({'defaultSort': picked});
     _saved();
+  }
+
+  // ---------------- Home page photos ----------------
+  Future<void> _photoSetting(String key, String title, String help, double maxWidth) async {
+    final snap = await _svc.settingsRef.get();
+    final current = ((snap.data()?['site'] as Map?)?[key] ?? '').toString();
+    if (!mounted) return;
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(help),
+        actions: [
+          if (current.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'remove'),
+              style: TextButton.styleFrom(foregroundColor: AppTheme.danger),
+              child: const Text('Remove'),
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'pick'), child: Text(current.isEmpty ? 'Choose photo' : 'Replace photo')),
+        ],
+      ),
+    );
+    if (action == 'remove') {
+      await _svc.deleteSiteImage(current);
+      await _svc.saveSite({key: ''});
+      _saved();
+    } else if (action == 'pick') {
+      final ref = await _pickPhoto('site_${key.toLowerCase()}_${DateTime.now().millisecondsSinceEpoch}', maxWidth: maxWidth);
+      if (ref == null) return;
+      await _svc.deleteSiteImage(current);
+      await _svc.saveSite({key: ref});
+      _saved();
+    }
   }
 
   // ---------------- Payment QR ----------------

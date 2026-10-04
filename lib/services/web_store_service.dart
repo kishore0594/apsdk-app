@@ -233,6 +233,25 @@ class WebStoreService {
       // Banners, delivery note, trust lines, owner story, about, contact
       // links and category photos — edited in Web Store > Website content.
       'site': Map<String, dynamic>.from((settings['site'] as Map?) ?? const {}),
+      'recipes': [
+        for (final r in recipesOf(settings))
+          {
+            for (final k in const ['id', 'name', 'nameLocal', 'photo', 'tip', 'tipLocal']) k: (r[k] ?? '').toString(),
+            'minutes': (r['minutes'] as num?)?.toInt() ?? 0,
+            'serves': (r['serves'] as num?)?.toInt() ?? 0,
+            for (final k in const ['ingredients', 'ingredientsLocal', 'steps', 'stepsLocal', 'benefits', 'benefitsLocal'])
+              k: ((r[k] as List?) ?? const []).map((x) => x.toString()).where((x) => x.trim().isNotEmpty).toList(),
+            // Only products that are on the web store, and active combos.
+            'products': [
+              for (final id in ((r['products'] as List?) ?? const []).map((x) => x.toString()))
+                if (id.startsWith('combo:')
+                    ? combosOf(settings).any((c) => 'combo:${c['id']}' == id && c['active'] != false)
+                    : products.any((p) => p['id'] == id && isOnline(p)))
+                  id
+            ],
+          }
+      ],
+      'todayRecipe': (settings['todayRecipe'] ?? '').toString(),
       'combos': [
         for (final c in combosOf(settings))
           if (c['active'] != false &&
@@ -264,6 +283,35 @@ class WebStoreService {
             }
       ],
     };
+  }
+
+  // ---------------- Recipes ----------------
+  // webstore/settings: recipes = [{id, name, nameLocal, photo, minutes, serves,
+  // ingredients[], ingredientsLocal[], steps[], stepsLocal[], benefits[],
+  // benefitsLocal[], tip, tipLocal, products[]}], todayRecipe = id (chosen by the shop).
+  // products holds product ids and 'combo:<id>' for combos.
+  static List<Map<String, dynamic>> recipesOf(Map<String, dynamic> settings) =>
+      ((settings['recipes'] as List?) ?? const []).map((r) => Map<String, dynamic>.from(r as Map)).toList();
+
+  /// Starter recipes linked to the shop's own products by name.
+  static List<Map<String, dynamic>> starterRecipesFor(List<Map<String, dynamic>> products, List<Map<String, Object>> library) {
+    return [
+      for (final r in library)
+        () {
+          String? link;
+          for (final k in (r['keys'] as List).cast<String>()) {
+            final hit = products.where((p) => (p['name'] ?? '').toString().toLowerCase().contains(k)).toList();
+            if (hit.isNotEmpty) {
+              link = hit.first['id'] as String;
+              break;
+            }
+          }
+          final m = Map<String, dynamic>.from(r)..remove('keys');
+          m['photo'] = '';
+          m['products'] = [if (link != null) link];
+          return m;
+        }(),
+    ];
   }
 
   // ---------------- Combo offers ----------------
