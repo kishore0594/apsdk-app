@@ -449,6 +449,18 @@ class _OrderSheetState extends State<_OrderSheet> {
     return lines.join('\n');
   }
 
+  // After delivery: thank the customer and ask for a rating (opens the
+  // rating form on the website directly, on any phone).
+  String _rateMessage(String lang) {
+    final ta = lang == 'ta';
+    final shop = ((ta ? _store['nameLocal'] : null) ?? _store['name'] ?? 'our shop').toString();
+    final no = (_o['orderNo'] ?? _id).toString();
+    final link = '${WebStoreService.trackingLink(no, Firebase.app().options.projectId)}&rate=1';
+    return ta
+        ? 'வணக்கம் ${_customer['name']} 🙏\nஉங்கள் ஆர்டர் $no-க்கு நன்றி!\nபொருட்கள் எப்படி இருந்தன? ஒரு நிமிடத்தில் மதிப்பிடுங்கள் ⭐\n$link\n— $shop'
+        : 'Hello ${_customer['name']} 🙏\nThank you for your order $no!\nHow did you like it? Please rate your items — it takes a minute ⭐\n$link\n— $shop';
+  }
+
   String _receiptMessage(String lang) {
     final ta = lang == 'ta';
     final shop = ((ta ? _store['nameLocal'] : null) ?? _store['name'] ?? 'our shop').toString();
@@ -458,7 +470,7 @@ class _OrderSheetState extends State<_OrderSheet> {
         : 'Hello ${_customer['name']} 🙏\nPayment of $total received for order ${_o['orderNo']} ✅\nThank you!\n— $shop';
   }
 
-  Future<void> _sendWhatsApp({bool receipt = false}) async {
+  Future<void> _sendWhatsApp({bool receipt = false, bool rate = false}) async {
     final phone = (_customer['phone'] ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
     if (phone.length != 10) {
       ScaffoldMessenger.of(context)
@@ -467,7 +479,7 @@ class _OrderSheetState extends State<_OrderSheet> {
     }
     final lang = await _askLanguage();
     if (lang == null) return;
-    final url = Uri.parse('https://wa.me/91$phone?text=${Uri.encodeComponent(receipt ? _receiptMessage(lang) : _message(lang))}');
+    final url = Uri.parse('https://wa.me/91$phone?text=${Uri.encodeComponent(rate ? _rateMessage(lang) : receipt ? _receiptMessage(lang) : _message(lang))}');
     try {
       final launched = await launchUrl(url, mode: LaunchMode.externalApplication);
       if (launched) {
@@ -664,6 +676,15 @@ class _OrderSheetState extends State<_OrderSheet> {
               icon: const Icon(Icons.receipt_long_outlined),
               label: const Text('Send "payment received" on WhatsApp'),
             ),
+            if (_status == 'delivered' || _status == 'paid') ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _busy ? null : () => _sendWhatsApp(rate: true),
+                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+                icon: const Icon(Icons.star_outline),
+                label: const Text('Ask for a rating on WhatsApp'),
+              ),
+            ],
             const SizedBox(height: 8),
             if (next != null && _status != 'cancelled')
               OutlinedButton(
