@@ -161,6 +161,16 @@ class _WebContentScreenState extends State<WebContentScreen> {
                 onTap: () => _payQrEditor(v('payQr')),
               ),
               _section(
+                icon: Icons.policy_outlined,
+                title: 'Policies and FSSAI number',
+                summary: [
+                  v('fssai').isEmpty ? 'FSSAI number not added' : 'FSSAI ${v('fssai')}',
+                  'dispatch ${v('dispatchTime').isEmpty ? '1–2 working days' : v('dispatchTime')}',
+                  v('returnPolicy').isEmpty ? 'standard return policy' : 'your own return policy',
+                ].join(' · '),
+                onTap: () => _policyEditor(site),
+              ),
+              _section(
                 icon: Icons.photo_library_outlined,
                 title: 'Category photos',
                 summary: '${catImages.length} of ${widget.categories.length} categories have a photo',
@@ -362,6 +372,44 @@ class _WebContentScreenState extends State<WebContentScreen> {
       'heroTitleLocal': titleTa.text.trim(),
       'heroSub': sub.text.trim(),
       'heroSubLocal': subTa.text.trim(),
+    });
+    _saved();
+  }
+
+  // ---------------- Policies ----------------
+  // The website has Shipping, Returns, Privacy, Terms and Contact pages
+  // (footer links). Google Shopping and payment gateways look for them.
+  Future<void> _policyEditor(Map<String, dynamic> site) async {
+    String s(String k) => (site[k] ?? '').toString();
+    final fssai = TextEditingController(text: s('fssai'));
+    final dispatch = TextEditingController(text: s('dispatchTime'));
+    final dispatchTa = TextEditingController(text: s('dispatchTimeLocal'));
+    final ship = TextEditingController(text: s('shippingPolicy'));
+    final shipTa = TextEditingController(text: s('shippingPolicyLocal'));
+    final ret = TextEditingController(text: s('returnPolicy'));
+    final retTa = TextEditingController(text: s('returnPolicyLocal'));
+    if (!await _dialog('Policies and FSSAI', [
+      const Text(
+          'Shown on the website pages Shipping, Returns, Privacy, Terms and Contact (footer links). '
+          'Leave a policy empty to use the standard text — open it on your website and read it once.',
+          style: TextStyle(fontSize: 12, color: Colors.black54)),
+      const SizedBox(height: 10),
+      _field(fssai, 'FSSAI licence / registration number', hint: '14 digits', type: TextInputType.number),
+      _field(dispatch, 'Dispatch time', hint: '1–2 working days'),
+      _field(dispatchTa, 'Dispatch time in Tamil', hint: '1–2 வேலை நாட்களுக்குள்'),
+      _field(ship, 'Shipping policy (optional, one point per line)', lines: 4),
+      _field(shipTa, 'Shipping policy in Tamil', lines: 4),
+      _field(ret, 'Return and refund policy (optional, one point per line)', lines: 4),
+      _field(retTa, 'Return and refund policy in Tamil', lines: 4),
+    ])) return;
+    await _svc.saveSite({
+      'fssai': fssai.text.replaceAll(RegExp(r'[^0-9A-Za-z ]'), '').trim(),
+      'dispatchTime': dispatch.text.trim(),
+      'dispatchTimeLocal': dispatchTa.text.trim(),
+      'shippingPolicy': ship.text.trim(),
+      'shippingPolicyLocal': shipTa.text.trim(),
+      'returnPolicy': ret.text.trim(),
+      'returnPolicyLocal': retTa.text.trim(),
     });
     _saved();
   }

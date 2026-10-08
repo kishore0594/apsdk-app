@@ -10,6 +10,7 @@ import 'shipping_screen.dart';
 import 'offer_alerts_screen.dart';
 import 'feedback_screen.dart';
 import 'recipes_screen.dart';
+import 'search_words_screen.dart';
 import '../services/grain_library.dart';
 import '../utils/tamil_names.dart';
 
@@ -217,6 +218,24 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                         const Icon(Icons.chevron_right, color: Colors.black38),
                       ]),
                     ),
+                  const SizedBox(height: 12),
+                  AppCard(
+                    padding: const EdgeInsets.all(14),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchWordsScreen())),
+                    child: Row(children: [
+                      const IconBadge(icon: Icons.manage_search, color: AppTheme.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Text('What customers searched', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                          const SizedBox(height: 2),
+                          Text('Words typed on your website — and what they could not find',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        ]),
+                      ),
+                      const Icon(Icons.chevron_right, color: Colors.black38),
+                    ]),
+                  ),
                   const SizedBox(height: 12),
                   if (_canEdit) ...[
                     _FeedbackCard(),
@@ -638,6 +657,7 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
 
   Future<void> _editProductWeb(Map<String, dynamic> p) async {
     final tamil = TextEditingController(text: (p['name_local'] ?? '').toString());
+    final aliases = TextEditingController(text: WebStoreService.aliasesOf(p).join(', '));
     final pack = TextEditingController(text: (p['web_pack'] ?? '').toString());
     final offer = TextEditingController(
         text: ((p['offer_price'] as num?)?.toDouble() ?? 0) > 0 ? (p['offer_price'] as num).toString() : '');
@@ -695,6 +715,17 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                         ? 'Type the Tamil name — no automatic name for this product'
                         : 'Empty = automatic name shown as the hint',
                     border: const OutlineInputBorder())),
+            const SizedBox(height: 10),
+            TextField(
+              controller: aliases,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                  labelText: 'Also called (names customers search)',
+                  hintText: 'Kezhvaragu, Kelvaragu, Nachni',
+                  helperText: 'Separate with commas. Common names are added automatically — add your local names here.',
+                  helperMaxLines: 2,
+                  border: OutlineInputBorder()),
+            ),
             const SizedBox(height: 10),
             TextField(
               controller: pack,
@@ -836,6 +867,7 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
     await _svc.updateProductWeb(p['id'] as String, {
       'web_price': onlineV > 0 ? onlineV : 0,
       'name_local': tamil.text.trim(),
+      'web_aliases': WebStoreService.aliasesOf({'web_aliases': aliases.text}),
       'web_pack': pack.text.trim(),
       'offer_price': (offerV > 0 && offerV < price) ? offerV : 0,
       'web_order': int.tryParse(order.text.trim()) ?? 999,

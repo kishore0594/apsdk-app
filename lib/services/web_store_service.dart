@@ -118,6 +118,28 @@ class WebStoreService {
   static List<String> _lines(dynamic v) =>
       ((v as List?) ?? const []).map((d) => d.toString().trim()).where((d) => d.isNotEmpty).toList();
 
+  /// The shop's own "Also called" names for a product (web_aliases):
+  /// up to 12, each at most 40 characters, no repeats.
+  static List<String> aliasesOf(Map<String, dynamic> p) {
+    final raw = p['web_aliases'];
+    final parts = raw is List ? raw.map((e) => e.toString()) : (raw ?? '').toString().split(RegExp(r'[,\n]'));
+    final seen = <String>{};
+    final out = <String>[];
+    for (final part in parts) {
+      final v = part.trim();
+      if (v.isEmpty || v.length > 40 || !seen.add(v.toLowerCase())) continue;
+      out.add(v);
+      if (out.length == 12) break;
+    }
+    return out;
+  }
+
+  /// Adds one name to a product's "Also called" list (from the search words screen).
+  Future<void> addAlias(Map<String, dynamic> p, String name) {
+    final list = [...aliasesOf(p), name.trim()];
+    return updateProductWeb(p['id'] as String, {'web_aliases': aliasesOf({'web_aliases': list})});
+  }
+
   static Map<String, dynamic> buildCatalog(List<Map<String, dynamic>> products, Map<String, dynamic> settings,
       [Map<String, List<Map<String, dynamic>>> approvedTips = const {},
       Map<String, List<Map<String, dynamic>>> approvedReviews = const {}]) {
@@ -142,6 +164,9 @@ class WebStoreService {
         'name': (p['name'] ?? '').toString().trim(),
         // The shop's own Tamil name, otherwise an automatic one.
         'nameLocal': tamilNameOf(p),
+        // "Also called": other names customers type (Kezhvaragu, Nachni...).
+        // The website adds the common ones itself; these are the shop's own.
+        if (aliasesOf(p).isNotEmpty) 'aliases': aliasesOf(p),
         'category': categoryOf(p),
         // Sub-category from Inventory (e.g. "Whole grains", "Flours"):
         // shown as filter chips inside the category on the website.
