@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'grain_library.dart';
@@ -452,6 +454,9 @@ class WebStoreService {
   /// Started for master accounts only (viewers can't publish).
   void startAutoSync() {
     if (_productsSub != null) return;
+    try {
+      mainSite(Firebase.app().options.projectId);
+    } catch (_) {/* checked again when needed */}
     _catalogSub = catalogRef.snapshots().listen((s) {
       _catalogSeen = true;
       _liveSig = s.data()?['sig'] as String?;
@@ -645,7 +650,98 @@ class WebStoreService {
       (o['itemsTotal'] as num?)?.toDouble() ?? (o['total'] as num?)?.toDouble() ?? 0;
   static double orderDelivery(Map<String, dynamic> o) =>
       (o['delivery_charge_override'] as num?)?.toDouble() ?? (o['deliveryCharge'] as num?)?.toDouble() ?? 0;
-  static double orderTotal(Map<String, dynamic> o) => orderItemsTotal(o) + orderDelivery(o);
+  static double orderTotal(Map<String, dynamic> o) => orderItemsTotal(o) + orderDelivery(o) - orderDiscount(o);
+  /// First-order coupon discount on a web order (0 when none).
+  static double orderDiscount(Map<String, dynamic> o) => (o['discount'] as num?)?.toDouble() ?? 0;
+  static String orderCoupon(Map<String, dynamic> o) => (o['coupon'] ?? '').toString();
+
+  /// Earlier web orders from the same phone number (newest first), so the
+  /// shop can see when a "first-order" coupon is used by a returning customer.
+  Future<List<String>> earlierOrders(String phone, String exceptOrderId) async {
+    if (phone.length != 10) return const [];
+    try {
+      final snap = await _orders.where('customer.phone', isEqualTo: phone).limit(20).get().timeout(const Duration(seconds: 10));
+      return snap.docs.where((d) => d.id != exceptOrderId).map((d) => (d.data()['orderNo'] ?? d.id).toString()).toList()
+        ..sort((a, b) => b.compareTo(a));
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  // ---------------- First-order coupon ----------------
+
+  /// Codes are capital letters and numbers only (the website and the
+  /// Firestore rules compare them exactly).
+  static String cleanCouponCode(String s) {
+    final c = s.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    return c.length > 20 ? c.substring(0, 20) : c;
+  }
+
+  static String couponSummary(Map<String, dynamic> site) {
+    final c = Map<String, dynamic>.from((site['coupon'] as Map?) ?? const {});
+    if (c['on'] != true || (c['code'] ?? '').toString().isEmpty) return 'Off — set a code for new customers\' first order';
+    final v = (c['value'] as num?)?.toInt() ?? 0;
+    final min = (c['min'] as num?)?.toInt() ?? 0;
+    final max = (c['max'] as num?)?.toInt() ?? 0;
+    final off = c['kind'] == 'percent' ? '$v% off${max > 0 ? ' (up to ₹$max)' : ''}' : '₹$v off';
+    return '${c['code']} · $off${min > 0 ? ' on orders above ₹$min' : ''}';
+  }
+
+  // ---------------- Main web address ----------------
+  // madhuraagro.in once it is connected; until then the Firebase address.
+  // The website's server answers /main-host, so the app follows the switch
+  // automatically (tracking links, share pictures, QR codes).
+  static const mainDomain = 'madhuraagro.in';
+  static String _siteBase = '';
+  static DateTime? _siteCheckedAt;
+
+  static String siteBaseFor(String projectId) => _siteBase.isNotEmpty ? _siteBase : 'https://$projectId.web.app';
+
+  static Future<String> mainSite(String projectId) async {
+    final fresh = _siteCheckedAt != null && DateTime.now().difference(_siteCheckedAt!) < const Duration(minutes: 30);
+    if (fresh && _siteBase.isNotEmpty) return _siteBase;
+    HttpClient? client;
+    try {
+      client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
+      final req = await client.getUrl(Uri.parse('https://$projectId.web.app/main-host')).timeout(const Duration(seconds: 6));
+      final res = await req.close().timeout(const Duration(seconds: 6));
+      final body = await res.transform(utf8.decoder).join().timeout(const Duration(seconds: 6));
+      final main = (jsonDecode(body) as Map)['main']?.toString() ?? '';
+      _siteBase = main == 'https://$mainDomain' ? main : '';
+      _siteCheckedAt = DateTime.now();
+    } catch (_) {
+      // Offline: keep whatever we knew.
+    } finally {
+      client?.close(force: true);
+    }
+    return siteBaseFor(projectId);
+  }
+
+  /// Website product addresses (/p/<slug>), worked out exactly like the
+  /// website does: from the name, with -2, -3 for repeated names.
+  static String slugify(String s) {
+    final ascii = s.toLowerCase().replaceAll(RegExp(r'[^\x00-\x7f]'), '');
+    var out = ascii.replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
+    if (out.length > 60) out = out.substring(0, 60);
+    return out.isEmpty ? 'item' : out;
+  }
+
+  static Map<String, String> productSlugs(List<Map<String, dynamic>> products, Map<String, dynamic> settings) {
+    final hidden = ((settings['hidden_categories'] as List?) ?? const []).map((e) => e.toString()).toSet();
+    final online = products.where((p) => isOnline(p) && !hidden.contains(categoryOf(p))).toList();
+    final groups = <String, List<String>>{};
+    for (final p in online) {
+      groups.putIfAbsent(slugify((p['name'] ?? '').toString().trim()), () => []).add(p['id'] as String);
+    }
+    final out = <String, String>{};
+    groups.forEach((base, ids) {
+      ids.sort();
+      for (var i = 0; i < ids.length; i++) {
+        out[ids[i]] = i == 0 ? base : '$base-${i + 1}';
+      }
+    });
+    return out;
+  }
   static String orderAddress(Map<String, dynamic> c) => [
         c['address'],
         c['landmark'],
@@ -704,7 +800,7 @@ class WebStoreService {
   }
 
   /// Public tracking link for an order, e.g. https://<project>.web.app/?track=SMA-1001-AB12
-  static String trackingLink(String orderNo, String projectId) => 'https://$projectId.web.app/?track=$orderNo';
+  static String trackingLink(String orderNo, String projectId) => '${siteBaseFor(projectId)}/?track=$orderNo';
 
   /// One WhatsApp confirmation sent — kept as a count plus a history.
   Future<void> logOrderWhatsApp(String orderId, String language) => _write(_orders.doc(orderId).update({

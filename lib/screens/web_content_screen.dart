@@ -161,6 +161,12 @@ class _WebContentScreenState extends State<WebContentScreen> {
                 onTap: () => _payQrEditor(v('payQr')),
               ),
               _section(
+                icon: Icons.card_giftcard_outlined,
+                title: 'First-order coupon',
+                summary: WebStoreService.couponSummary(site),
+                onTap: () => _couponEditor(site),
+              ),
+              _section(
                 icon: Icons.policy_outlined,
                 title: 'Policies and FSSAI number',
                 summary: [
@@ -411,6 +417,98 @@ class _WebContentScreenState extends State<WebContentScreen> {
       'returnPolicy': ret.text.trim(),
       'returnPolicyLocal': retTa.text.trim(),
     });
+    _saved();
+  }
+
+  // ---------------- First-order coupon ----------------
+  // One code for a customer's first web order (one use per phone number).
+  // The website shows it in a strip at the top and at checkout; the
+  // Firestore rules check the code, the discount and the phone number.
+  Future<void> _couponEditor(Map<String, dynamic> site) async {
+    final c = Map<String, dynamic>.from((site['coupon'] as Map?) ?? const {});
+    var on = c['on'] == true;
+    var percent = c['kind'] == 'percent';
+    final code = TextEditingController(text: (c['code'] ?? 'WELCOME50').toString());
+    final value = TextEditingController(text: ((c['value'] as num?)?.toInt() ?? 50).toString());
+    final min = TextEditingController(text: ((c['min'] as num?)?.toInt() ?? 300).toString());
+    final max = TextEditingController(text: ((c['max'] as num?)?.toInt() ?? 0) == 0 ? '' : '${(c['max'] as num).toInt()}');
+    String? error;
+    final saved = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: const Text('First-order coupon'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text(
+                  'New customers type this code at checkout and get money off their first web order. '
+                  'Each phone number can use it once. Orders show the code, and the app warns you if '
+                  'that phone has ordered before.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: on,
+                onChanged: (x) => setDlg(() => on = x),
+                title: const Text('Show the coupon on the website'),
+              ),
+              _field(code, 'Code (letters and numbers)', hint: 'WELCOME50'),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('₹ off')),
+                  ButtonSegment(value: true, label: Text('% off')),
+                ],
+                selected: {percent},
+                onSelectionChanged: (x) => setDlg(() => percent = x.first),
+              ),
+              const SizedBox(height: 10),
+              _field(value, percent ? 'Discount (%)' : 'Discount (₹)', hint: percent ? '10' : '50', type: TextInputType.number),
+              _field(min, 'Minimum order (₹, items only)', hint: '300', type: TextInputType.number),
+              if (percent) _field(max, 'Maximum discount (₹, optional)', hint: '100', type: TextInputType.number),
+              if (error != null)
+                Text(error!, style: const TextStyle(color: AppTheme.danger, fontSize: 12.5)),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () {
+                final k = WebStoreService.cleanCouponCode(code.text);
+                final v = int.tryParse(value.text.trim()) ?? 0;
+                final m = int.tryParse(min.text.trim()) ?? 0;
+                final x = int.tryParse(max.text.trim()) ?? 0;
+                String? e;
+                if (k.length < 3) {
+                  e = 'Use at least 3 letters or numbers, e.g. WELCOME50.';
+                } else if (v <= 0) {
+                  e = 'Enter the discount.';
+                } else if (percent && v > 90) {
+                  e = 'A percentage discount can be at most 90%.';
+                } else if (!percent && m > 0 && v >= m) {
+                  e = 'The discount should be less than the minimum order.';
+                } else if (m < 0 || x < 0) {
+                  e = 'Amounts cannot be negative.';
+                }
+                if (e != null) {
+                  setDlg(() => error = e);
+                  return;
+                }
+                Navigator.pop(ctx, {
+                  'on': on,
+                  'code': k,
+                  'kind': percent ? 'percent' : 'flat',
+                  'value': v,
+                  'min': m,
+                  'max': percent ? x : 0,
+                });
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved == null) return;
+    await _svc.saveSite({'coupon': saved});
     _saved();
   }
 

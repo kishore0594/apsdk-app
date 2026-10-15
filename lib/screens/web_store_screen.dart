@@ -11,6 +11,7 @@ import 'offer_alerts_screen.dart';
 import 'feedback_screen.dart';
 import 'recipes_screen.dart';
 import 'search_words_screen.dart';
+import 'share_pictures_screen.dart';
 import '../services/grain_library.dart';
 import '../utils/tamil_names.dart';
 
@@ -230,6 +231,24 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                           const Text('What customers searched', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
                           const SizedBox(height: 2),
                           Text('Words typed on your website — and what they could not find',
+                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        ]),
+                      ),
+                      const Icon(Icons.chevron_right, color: Colors.black38),
+                    ]),
+                  ),
+                  const SizedBox(height: 12),
+                  AppCard(
+                    padding: const EdgeInsets.all(14),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SharePicturesScreen())),
+                    child: Row(children: [
+                      const IconBadge(icon: Icons.photo_camera_back_outlined, color: Color(0xFF128C7E), size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          const Text('Share pictures', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                          const SizedBox(height: 2),
+                          Text('Today\'s prices, an offer or your coupon — with QR code, for WhatsApp Status and Instagram',
                               style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                         ]),
                       ),

@@ -227,6 +227,20 @@ class _OrderSheetState extends State<_OrderSheet> {
   final _svc = WebStoreService.instance;
   late Map<String, dynamic> _o = widget.order;
   bool _busy = false;
+  // Earlier orders from this phone (checked when a first-order coupon is used).
+  List<String>? _earlier;
+
+  @override
+  void initState() {
+    super.initState();
+    WebStoreService.mainSite(Firebase.app().options.projectId);
+    if (WebStoreService.orderCoupon(_o).isNotEmpty) {
+      final phone = (_customer['phone'] ?? '').toString();
+      _svc.earlierOrders(phone, _id).then((list) {
+        if (mounted) setState(() => _earlier = list);
+      });
+    }
+  }
 
   String get _id => _o['id'] as String;
   String get _status => (_o['status'] ?? 'requested').toString();
@@ -411,6 +425,8 @@ class _OrderSheetState extends State<_OrderSheet> {
       '${ta ? 'பொருட்கள் மொத்தம்' : 'Items total'}: ${formatCurrency(itemsTotal)}',
       if (!pickup)
         '${ta ? 'டெலிவரி கட்டணம்' : 'Delivery charge'}: ${delivery == 0 ? (ta ? 'இலவசம்' : 'Free') : formatCurrency(delivery)}',
+      if (WebStoreService.orderDiscount(_o) > 0)
+        '${ta ? 'கூப்பன்' : 'Coupon'} ${WebStoreService.orderCoupon(_o)}: −${formatCurrency(WebStoreService.orderDiscount(_o))}',
       '*${ta ? 'செலுத்த வேண்டிய தொகை' : 'Total to pay'}: ${formatCurrency(total)}*',
       '',
       if (pickup) ...[
@@ -569,11 +585,12 @@ class _OrderSheetState extends State<_OrderSheet> {
               'unit_price': ((useApp ? c['current_price'] : c['ordered_price']) as double) / (c['per_pack'] as double),
             }
         ],
-        discount: 0,
+        // First-order coupon from the website, so the sale matches what the customer pays.
+        discount: WebStoreService.orderDiscount(_o),
         paymentType: credit ? 'CREDIT' : 'CASH',
         // Linked for paid sales too, so the sale shows in the customer's history.
         vendorId: vendorId,
-        paidAmount: credit ? 0 : total + WebStoreService.orderDelivery(_o),
+        paidAmount: credit ? 0 : total + WebStoreService.orderDelivery(_o) - WebStoreService.orderDiscount(_o),
         notes: 'Web order ${_o['orderNo']}',
         deliveryCharge: WebStoreService.orderDelivery(_o),
       );
@@ -647,7 +664,21 @@ class _OrderSheetState extends State<_OrderSheet> {
                 freeIfZero: true,
               ),
             ),
+          if (WebStoreService.orderDiscount(_o) > 0)
+            _moneyRow('First-order coupon ${WebStoreService.orderCoupon(_o)}', -WebStoreService.orderDiscount(_o)),
           _moneyRow('Total to pay', WebStoreService.orderTotal(_o), bold: true),
+          if (WebStoreService.orderCoupon(_o).isNotEmpty && (_earlier?.isNotEmpty ?? false))
+            Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: const Color(0xFFE36A06).withOpacity(0.10), borderRadius: BorderRadius.circular(10)),
+              child: Text(
+                'This phone number ordered before (${_earlier!.take(3).join(', ')}), but used the first-order '
+                'coupon. You can still accept it, or ask the customer to pay the normal price.',
+                style: const TextStyle(fontSize: 12.5, height: 1.35, color: Color(0xFF9A4A00)),
+              ),
+            ),
           if (mismatch)
             Container(
               margin: const EdgeInsets.only(top: 10),
