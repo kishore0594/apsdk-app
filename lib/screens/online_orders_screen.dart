@@ -647,6 +647,8 @@ class _OrderSheetState extends State<_OrderSheet> {
             if ((_o['paymentRef'] ?? '').toString().isNotEmpty) 'Ref ${_o['paymentRef']}',
             if (_o['payment_verified'] == true) 'verified ✓',
           ].join(' · ')),
+          if ((_o['source'] ?? '').toString().isNotEmpty)
+            _info(Icons.campaign_outlined, 'From ${const {'status': 'WhatsApp Status', 'qr': 'QR code (poster / pack)', 'wa': 'WhatsApp link', 'gbp': 'Google Business Profile', 'insta': 'Instagram', 'fb': 'Facebook'}[(_o['source']).toString()] ?? _o['source']}'),
           if (_o['proof'] == true) _proofSection(canEdit),
           if ((_o['weightKg'] as num?) != null && _o['fulfilment'] != 'pickup')
             _info(Icons.scale_outlined, 'Parcel weight: ${(_o['weightKg'] as num).toString()} kg'),

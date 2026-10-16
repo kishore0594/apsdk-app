@@ -144,7 +144,8 @@ class WebStoreService {
 
   static Map<String, dynamic> buildCatalog(List<Map<String, dynamic>> products, Map<String, dynamic> settings,
       [Map<String, List<Map<String, dynamic>>> approvedTips = const {},
-      Map<String, List<Map<String, dynamic>>> approvedReviews = const {}]) {
+      Map<String, List<Map<String, dynamic>>> approvedReviews = const {},
+      Map<String, String>? imageVersions]) {
     final items = <Map<String, dynamic>>[];
     for (final p in products.where(isOnline)) {
       final price = priceOf(p);
@@ -174,7 +175,11 @@ class WebStoreService {
         // shown as filter chips inside the category on the website.
         'subcategory': (p['subcategory'] ?? '').toString().trim(),
         'subcategoryLocal': autoTamil((p['subcategory'] ?? '').toString()) ?? '',
-        'image': (photo != null && photo.isNotEmpty) ? 'fs:${p['id']}:${photoHash(photo)}' : '',
+        // The photo version actually stored for the website (when known), so
+        // the website never asks for a photo that hasn't arrived yet.
+        'image': imageVersions != null
+            ? ((imageVersions[p['id']] ?? '').isEmpty ? '' : 'fs:${p['id']}:${imageVersions[p['id']]}')
+            : ((photo != null && photo.isNotEmpty) ? 'fs:${p['id']}:${photoHash(photo)}' : ''),
         'inStock': ((p['quantity'] as num?)?.toDouble() ?? 0) > 0,
         'order': (p['web_order'] as num?)?.toInt() ?? 999,
         'description': ownText('web_desc', about[0]),
@@ -429,6 +434,14 @@ class WebStoreService {
     if (wa.length != 12) w.add('Add the shop WhatsApp number (12 digits, e.g. 919876543210) in Shop details.');
     final noPrice = products.where((p) => p['web_visible'] != false && priceOf(p) <= 0).length;
     if (noPrice > 0) w.add('$noPrice product(s) have no selling price, so they are not on the web store.');
+    final big = products
+        .where((p) => isOnline(p) && ((p['photo'] as String?)?.length ?? 0) > maxPhotoChars)
+        .map((p) => (p['name'] ?? '').toString())
+        .toList();
+    if (big.isNotEmpty) {
+      w.add('Photo too big for the website: ${big.join(', ')}. Open the product in Inventory and choose the photo again '
+          '(a smaller or cropped photo) — until then the website shows the old photo.');
+    }
     return w;
   }
 
@@ -521,6 +534,10 @@ class WebStoreService {
   void _schedule() {
     final products = _latestProducts, settings = _latestSettings;
     if (products == null || settings == null || !_catalogSeen || !_tipsSeen || !_reviewsSeen) return;
+    if (!_photosChecked) {
+      _photosChecked = true;
+      repairPhotos(); // once per app start: fix photos that never reached the website
+    }
     final sig = signatureOf(buildCatalog(products, settings, _approvedTips, _approvedReviews));
     if (sig == _liveSig) {
       if (!_publishing) sync.value = WebSyncState.upToDate;
@@ -558,33 +575,109 @@ class WebStoreService {
 
   Future<void> _publish(List<Map<String, dynamic>> products, Map<String, dynamic> settings,
       Map<String, List<Map<String, dynamic>>> tips, Map<String, List<Map<String, dynamic>>> reviews) async {
-    final catalog = buildCatalog(products, settings, tips, reviews);
-    final sig = signatureOf(catalog);
+    // The signature is of the catalog as it SHOULD be (every photo current),
+    // so a photo that couldn't be uploaded is tried again on the next change.
+    final sig = signatureOf(buildCatalog(products, settings, tips, reviews));
 
     // Photos first, so the website never points at a photo not yet there.
+    // What the website really has is checked (not only what we think we sent).
     final published = Map<String, dynamic>.from((settings['image_versions'] as Map?) ?? const {});
-    final wanted = <String, String>{};
+    final onSite = await _photoVersionsOnWebsite();
+    final stored = <String, String>{};
+    final wanted = <String>{};
+    for (final p in products.where(isOnline)) {
+      final photo = p['photo'] as String?;
+      if (photo == null || photo.isEmpty) continue;
+      final id = p['id'] as String;
+      wanted.add(id);
+      final hash = photoHash(photo);
+      final have = (onSite != null ? onSite[id] : published[id])?.toString() ?? '';
+      if (have == hash) {
+        stored[id] = hash;
+      } else if (photo.length <= maxPhotoChars && await _confirmedWrite(_images.doc(id).set({'data': photo, 'v': hash}))) {
+        stored[id] = hash;
+      } else if (have.isNotEmpty) {
+        stored[id] = have; // keep showing the previous photo until the new one arrives
+      }
+    }
+    for (final id in published.keys) {
+      if (!wanted.contains(id)) await _write(_images.doc(id).delete());
+    }
+
+    final catalog = buildCatalog(products, settings, tips, reviews, stored);
+    await _write(catalogRef.set({...catalog, 'sig': sig, 'updatedAt': FieldValue.serverTimestamp()}));
+    _liveSig = sig;
+    await _write(settingsRef.set(
+      {'image_versions': stored, 'last_published_at': DateTime.now().toIso8601String()},
+      SetOptions(mergeFields: ['image_versions', 'last_published_at']),
+    ));
+  }
+
+  /// A Firestore document holds at most 1 MB, so bigger photos can't reach
+  /// the website (shown as a warning in Web Store).
+  static const maxPhotoChars = 950000;
+
+  /// Waits for the server to really accept the write (photos are large, so
+  /// a quiet failure would leave the website showing an old photo).
+  Future<bool> _confirmedWrite(Future<void> op) async {
+    try {
+      await op.timeout(const Duration(seconds: 30));
+      return true;
+    } catch (e) {
+      debugPrint('Photo upload not confirmed: $e');
+      return false;
+    }
+  }
+
+  /// Photo versions the website has stored, from the website's own server
+  /// (/photo-versions). Null when it can't be reached (offline).
+  Future<Map<String, String>?> _photoVersionsOnWebsite() async {
+    HttpClient? client;
+    try {
+      final base = await mainSite(Firebase.app().options.projectId);
+      client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      final req = await client.getUrl(Uri.parse('$base/photo-versions')).timeout(const Duration(seconds: 8));
+      final res = await req.close().timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return null;
+      final body = await res.transform(utf8.decoder).join().timeout(const Duration(seconds: 10));
+      final m = jsonDecode(body);
+      if (m is! Map) return null;
+      return {for (final e in m.entries) e.key.toString(): e.value.toString()};
+    } catch (e) {
+      debugPrint('Photo check unavailable: $e');
+      return null;
+    } finally {
+      client?.close(force: true);
+    }
+  }
+
+  /// Checks every product photo against the website and uploads any that
+  /// are missing or old. Runs once when the app opens, and from the Web
+  /// Store screen. Returns how many photos were fixed (-1 = website not reachable).
+  Future<int> repairPhotos() async {
+    final products = _latestProducts ?? await watchProducts().first;
+    final onSite = await _photoVersionsOnWebsite();
+    if (onSite == null) return -1;
+    var fixed = 0;
+    var mismatch = false;
     for (final p in products.where(isOnline)) {
       final photo = p['photo'] as String?;
       if (photo == null || photo.isEmpty) continue;
       final id = p['id'] as String;
       final hash = photoHash(photo);
-      wanted[id] = hash;
-      if (published[id] != hash) {
-        await _write(_images.doc(id).set({'data': photo, 'v': hash}));
-      }
+      if (onSite[id] == hash) continue;
+      mismatch = true;
+      if (photo.length > maxPhotoChars) continue;
+      if (await _confirmedWrite(_images.doc(id).set({'data': photo, 'v': hash}))) fixed++;
     }
-    for (final id in published.keys) {
-      if (!wanted.containsKey(id)) await _write(_images.doc(id).delete());
+    if (mismatch) {
+      _liveSig = null; // republish so the website points at the new photos
+      _schedule();
     }
-
-    await _write(catalogRef.set({...catalog, 'sig': sig, 'updatedAt': FieldValue.serverTimestamp()}));
-    _liveSig = sig;
-    await _write(settingsRef.set(
-      {'image_versions': wanted, 'last_published_at': DateTime.now().toIso8601String()},
-      SetOptions(mergeFields: ['image_versions', 'last_published_at']),
-    ));
+    return fixed;
   }
+
+  bool _photosChecked = false;
 
   // ---------------- Website photos (banners, owner, categories) ----------------
   // Stored straight in catalog_images/{key} (public, like product photos)
@@ -686,6 +779,30 @@ class WebStoreService {
     final off = c['kind'] == 'percent' ? '$v% off${max > 0 ? ' (up to ₹$max)' : ''}' : '₹$v off';
     return '${c['code']} · $off${min > 0 ? ' on orders above ₹$min' : ''}';
   }
+
+  // ---------------- Brands ----------------
+  // Madhura Millets / Madhura Rice / Madhura Cattle Feeds — worked out like
+  // the website does (category first, then the product name).
+  static String brandOf(Map<String, dynamic> p) {
+    final c = '${p['category'] ?? ''} ${p['subcategory'] ?? ''}'.toLowerCase();
+    if (RegExp(r'cattle|feed|poultry|bran|husk|cake|pellet|theevanam|தீவன|கால்நடை').hasMatch(c)) return 'cattle';
+    final n = '${p['name'] ?? ''} ${tamilNameOf(p)}'.toLowerCase();
+    if (RegExp(r'punnakku|pinnakku|thavidu|pellet|cattle|knc|skm|poultry|theevanam|husk|bran|cake|தீவன|புண்ணாக்கு|தவிடு').hasMatch(n)) {
+      return 'cattle';
+    }
+    if (RegExp(r'ragi|kambu|cumbu|thinai|samai|varagu|kuthiraivali|kudiraivali|panivaragu|cholam|sorghum|jowar|millet|kollu|horse ?gram|mochai|gram|payaru|peanut|groundnut|maize|makka|கேழ்வரகு|கம்பு|தினை|சாமை|வரகு|சோளம்|கொள்ளு')
+        .hasMatch(n)) {
+      return 'millets';
+    }
+    if (RegExp(r'rice|arisi|samba|ponni|idli|idly|basmati|masoori|masuri|rnr|bpt|pbt|kavuni|kattuyanam|poongar|thooyamalli|kuruvai|kullakar|matta|அரிசி')
+            .hasMatch(n) ||
+        RegExp(r'rice|arisi|அரிசி').hasMatch(c)) {
+      return 'rice';
+    }
+    return 'millets';
+  }
+
+  static const brandSlugs = {'millets': 'millets', 'rice': 'rice', 'cattle': 'cattle-feed'};
 
   // ---------------- Main web address ----------------
   // madhuraagro.in once it is connected; until then the Firebase address.

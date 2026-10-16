@@ -248,13 +248,44 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           const Text('Share pictures', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
                           const SizedBox(height: 2),
-                          Text('Today\'s prices, an offer or your coupon — with QR code, for WhatsApp Status and Instagram',
+                          Text('Brand pictures of prices, offers or your coupon — for WhatsApp Status and Instagram',
                               style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                         ]),
                       ),
                       const Icon(Icons.chevron_right, color: Colors.black38),
                     ]),
                   ),
+                  if (_canEdit) ...[
+                    const SizedBox(height: 12),
+                    AppCard(
+                      padding: const EdgeInsets.all(14),
+                      onTap: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        messenger.showSnackBar(const SnackBar(content: Text('Checking website photos…')));
+                        final fixed = await _svc.repairPhotos();
+                        messenger.hideCurrentSnackBar();
+                        messenger.showSnackBar(SnackBar(
+                            content: Text(fixed < 0
+                                ? 'Could not reach the website — check the internet and try again.'
+                                : fixed == 0
+                                    ? 'All website photos match the app ✓'
+                                    : '$fixed photo(s) sent again — the website updates in a minute.')));
+                      },
+                      child: Row(children: [
+                        const IconBadge(icon: Icons.image_search, color: AppTheme.primary, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            const Text('Check website photos', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                            const SizedBox(height: 2),
+                            Text('Makes sure every product photo on the website is the same as in the app',
+                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                          ]),
+                        ),
+                        const Icon(Icons.chevron_right, color: Colors.black38),
+                      ]),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   if (_canEdit) ...[
                     _FeedbackCard(),
