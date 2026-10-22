@@ -1,7 +1,7 @@
 name: madhura_agro_traders
 description: "Madhura Agro Traders - Store sales, credit, inventory and supplier management"
 publish_to: 'none'
-version: 1.0.0+69
+version: 1.0.0+71
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -35,3 +35,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/logo.png
+  fonts:
+    - family: Kaushan
+      fonts:
+        - asset: assets/fonts/KaushanScript-Regular.ttf

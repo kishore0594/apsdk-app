@@ -5,8 +5,8 @@
 /// rather than guessing from "I installed it last week".
 class AppInfo {
   static const String appName = 'Madhura Agro Traders';
-  static const String appVersion = '1.49.0';
-  static const String buildDate = 'October 16, 2026 (brand pictures, Status links, photo check)';
+  static const String appVersion = '1.51.0';
+  static const String buildDate = 'October 19, 2026 (4 more poster styles, background photos)';
 
   /// Required to create a new account from the Sign Up screen. This app
   /// is still single-tenant — every account sees the same store data —

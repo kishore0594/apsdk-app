@@ -15,6 +15,7 @@ import '../utils/app_theme.dart';
 import '../utils/keyed_stream.dart';
 import '../utils/tamil_names.dart';
 import '../utils/user_role.dart';
+import 'poster_styles.dart';
 
 /// Ready-made pictures for WhatsApp Status, Instagram and groups:
 /// today's prices (one brand at a time), one product offer, or the
@@ -62,13 +63,54 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
   bool _tall = false; // Status size (9:16) instead of square
   bool _busy = false;
   final Map<String, List<String>> _picked = {}; // brand -> product ids on the price picture
-  String? _offerId;
+  // Offer: up to 5 products, one poster each (WhatsApp Status plays them in a row).
+  List<String> _offerIds = [];
+  int _page = 0; // which product's poster is shown
+  PosterStyle _style = PosterStyle.classic;
+  String? get _offerId => _offerIds.isEmpty ? null : _offerIds[_page < _offerIds.length ? _page : 0];
+  bool get _designed => _kind == _Kind.offer && _style != PosterStyle.classic;
+  // How many pictures the offer makes: one per product, or one for all (Variety Grid, Support Local).
+  int get _pages => _kind == _Kind.offer && !posterIsSingle(_style) && _offerIds.length > 1 ? _offerIds.length : 1;
+  // The shop's own background photos per style — kept on this phone only.
+  final Map<String, Uint8List> _bgs = {};
+
+  Future<File> _bgFile(PosterStyle st) async =>
+      File('${(await getApplicationDocumentsDirectory()).path}/poster_bg_${st.name}.jpg');
+
+  Future<void> _loadBackgrounds() async {
+    for (final st in PosterStyle.values.where(posterUsesBackground)) {
+      try {
+        final f = await _bgFile(st);
+        if (await f.exists()) _bgs[st.name] = await f.readAsBytes();
+      } catch (_) {/* none yet */}
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickBackground() async {
+    final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1080, imageQuality: 78);
+    if (x == null) return;
+    final bytes = await x.readAsBytes();
+    await (await _bgFile(_style)).writeAsBytes(bytes);
+    setState(() => _bgs[_style.name] = bytes);
+  }
+
+  Future<void> _removeBackground() async {
+    try {
+      final f = await _bgFile(_style);
+      if (await f.exists()) await f.delete();
+    } catch (_) {/* already gone */}
+    setState(() => _bgs.remove(_style.name));
+  }
   String _site = '';
 
   static const _cream = Color(0xFFF8F2E4);
   static const _shopDark = Color(0xFF1F3D27);
   static const _shopAccent = Color(0xFFC9A227);
   static const _wa = Color(0xFF128C7E);
+  static const _gridColors = [
+    Color(0xFF8A3B1E), Color(0xFF3E7D32), Color(0xFFC0651A), Color(0xFF1F6A73), Color(0xFF7B4FA0), Color(0xFF4D6B2A),
+  ];
 
   @override
   void initState() {
@@ -78,6 +120,7 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
     WebStoreService.mainSite(projectId).then((s) {
       if (mounted && s != _site) setState(() => _site = s);
     });
+    _loadBackgrounds();
   }
 
   @override
@@ -158,12 +201,12 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
             final brandItems = online.where((p) => WebStoreService.brandOf(p) == _brand).toList();
             _picked[_brand] ??= brandItems.where(_inStock).take(8).map((p) => p['id'] as String).toList();
             final offerList = online.where(_inStock).toList();
-            if (_offerId == null || !offerList.any((p) => p['id'] == _offerId)) {
+            _offerIds = _offerIds.where((id) => offerList.any((p) => p['id'] == id)).toList();
+            if (_offerIds.isEmpty && offerList.isNotEmpty) {
               final withOffer = offerList.where((p) => WebStoreService.webPriceOf(p) < WebStoreService.priceOf(p));
-              _offerId = withOffer.isNotEmpty
-                  ? withOffer.first['id'] as String
-                  : (offerList.isNotEmpty ? offerList.first['id'] as String : null);
+              _offerIds = [(withOffer.isNotEmpty ? withOffer.first : offerList.first)['id'] as String];
             }
+            if (_page >= _offerIds.length) _page = 0;
             final brand = _pictureBrand(online);
             return ListView(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 32),
@@ -192,9 +235,40 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
                 Wrap(spacing: 8, runSpacing: 4, children: [
                   ChoiceChip(label: const Text('English'), selected: !_tamil, onSelected: (_) => setState(() => _tamil = false)),
                   ChoiceChip(label: const Text('தமிழ்'), selected: _tamil, onSelected: (_) => setState(() => _tamil = true)),
-                  ChoiceChip(label: const Text('Square'), selected: !_tall, onSelected: (_) => setState(() => _tall = false)),
-                  ChoiceChip(label: const Text('Status (tall)'), selected: _tall, onSelected: (_) => setState(() => _tall = true)),
+                  if (!_designed) ...[
+                    ChoiceChip(label: const Text('Square'), selected: !_tall, onSelected: (_) => setState(() => _tall = false)),
+                    ChoiceChip(label: const Text('Status (tall)'), selected: _tall, onSelected: (_) => setState(() => _tall = true)),
+                  ],
                 ]),
+                if (_kind == _Kind.offer) ...[
+                  const SizedBox(height: 8),
+                  const Text('Poster style', style: TextStyle(fontSize: 12.5, color: Colors.black54)),
+                  const SizedBox(height: 4),
+                  Wrap(spacing: 8, runSpacing: 4, children: [
+                    for (final e in posterStyleNames.entries)
+                      ChoiceChip(
+                        label: Text(e.value),
+                        selected: _style == e.key,
+                        onSelected: (_) => setState(() {
+                          _style = e.key;
+                          _page = 0;
+                        }),
+                      ),
+                  ]),
+                  if (posterUsesBackground(_style))
+                    Row(children: [
+                      TextButton.icon(
+                        onPressed: _pickBackground,
+                        icon: const Icon(Icons.wallpaper, size: 18),
+                        label: Text(_bgs[_style.name] == null ? 'Add background photo' : 'Change background photo'),
+                      ),
+                      if (_bgs[_style.name] != null)
+                        TextButton(onPressed: _removeBackground, child: const Text('Remove')),
+                    ]),
+                  if (posterIsSingle(_style))
+                    const Text('This style puts all chosen products in one picture.',
+                        style: TextStyle(fontSize: 12, color: Colors.black54)),
+                ],
                 if (_kind != _Kind.coupon) ...[
                   const SizedBox(height: 8),
                   const Text('Offer line on the picture', style: TextStyle(fontSize: 12.5, color: Colors.black54)),
@@ -226,10 +300,26 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
                   child: FittedBox(
                     child: RepaintBoundary(
                       key: _cardKey,
-                      child: _picture(store, online, slugs, coupon, brand, logos),
+                      child: _designed
+                          ? _designedPoster(store, online, slugs, coupon, brand, logos)
+                          : _picture(store, online, slugs, coupon, brand, logos),
                     ),
                   ),
                 ),
+                if (_pages > 1) ...[
+                  const SizedBox(height: 8),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    for (var i = 0; i < _offerIds.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: ChoiceChip(
+                          label: Text('${i + 1}'),
+                          selected: _page == i,
+                          onSelected: (_) => setState(() => _page = i),
+                        ),
+                      ),
+                  ]),
+                ],
                 const SizedBox(height: 14),
                 Row(children: [
                   Expanded(
@@ -331,15 +421,30 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
     final current = list.where((p) => p['id'] == _offerId).toList();
     return [
       if (current.isNotEmpty) _logoButton(WebStoreService.brandOf(current.first), logos),
-      const Text('Product', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+      Text('Products (${_offerIds.length} of 5) — one poster each, shared together',
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
       const SizedBox(height: 6),
       for (final p in list)
-        RadioListTile<String>(
+        CheckboxListTile(
           dense: true,
           contentPadding: EdgeInsets.zero,
-          value: p['id'] as String,
-          groupValue: _offerId,
-          onChanged: (v) => setState(() => _offerId = v),
+          controlAffinity: ListTileControlAffinity.leading,
+          value: _offerIds.contains(p['id']),
+          onChanged: (on) => setState(() {
+            final id = p['id'] as String;
+            if (on == true) {
+              if (_offerIds.length >= 5) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Up to 5 products at a time — untick one first.')));
+                return;
+              }
+              _offerIds = [..._offerIds, id];
+              _page = _offerIds.length - 1;
+            } else if (_offerIds.length > 1) {
+              _offerIds = _offerIds.where((x) => x != id).toList();
+              _page = 0;
+            }
+          }),
           title: Text((p['name'] ?? '').toString()),
           subtitle: Text(WebStoreService.webPriceOf(p) < WebStoreService.priceOf(p)
               ? 'Offer ${_rs(WebStoreService.webPriceOf(p))} (was ${_rs(WebStoreService.priceOf(p))}) · ${_pack(p)}'
@@ -355,6 +460,7 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
     final ta = _tamil ? '/ta' : '';
     if (_kind == _Kind.prices) return '$_site$ta/shop/${WebStoreService.brandSlugs[_brand]}?src=$src';
     if (_kind == _Kind.offer) {
+      if (_offerIds.length > 1 && src == 'status') return '$_site$ta/?src=$src';
       final slug = _offerId == null ? null : slugs[_offerId];
       return slug == null ? '$_site$ta/?src=$src' : '$_site$ta/p/$slug?src=$src';
     }
@@ -382,6 +488,73 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
   }
 
   // ---------------- The picture ----------------
+
+  /// Offer poster in one of the designed styles (Bold Pop, Fresh Market,
+  /// Night Deal, Festive Kolam) for the product on the current page.
+  Widget _designedPoster(Map<String, dynamic> store, List<Map<String, dynamic>> online, Map<String, String> slugs,
+      Map<String, dynamic> coupon, String? brand, Map<String, dynamic> logos) {
+    final list = online.where((x) => x['id'] == _offerId).toList();
+    if (list.isEmpty) {
+      return Container(width: 360, height: 640, color: _cream, child: _empty('Choose a product below'));
+    }
+    final p = list.first;
+    final chosen = [for (final id in _offerIds) ...online.where((x) => x['id'] == id)];
+    final style = brand == null ? null : _brands[brand];
+    final local = (store['nameLocal'] ?? '').toString().trim();
+    final en = (store['name'] ?? '').toString().trim();
+    final shop = _tamil && local.isNotEmpty ? local : (en.isEmpty ? 'Sri Madhura Agro Traders' : en);
+    final nameEn = (p['name'] ?? '').toString().trim();
+    final nameTa = tamilNameOf(p).trim();
+    final price = WebStoreService.priceOf(p);
+    final now = WebStoreService.webPriceOf(p);
+    final brands = chosen.map(WebStoreService.brandOf).toSet();
+    final gridTitle = brands.length != 1
+        ? (_tamil ? 'இன்றைய தேர்வுகள்' : "Today's Picks")
+        : {
+            'millets': _tamil ? 'சிறுதானிய வகைகள்' : 'Millet Varieties',
+            'rice': _tamil ? 'அரிசி வகைகள்' : 'Rice Varieties',
+            'cattle': _tamil ? 'மாட்டுத் தீவனம்' : 'Cattle Feeds',
+          }[brands.first]!;
+    final gridSub = _tamil ? 'எங்கள் கடையிலிருந்து புதிதாக' : 'Fresh from our shop · cleaned & packed';
+    final isGrid = _style == PosterStyle.grid;
+    return buildPoster(
+      _style,
+      PosterData(
+        brand: style == null ? shop : (_tamil ? style.ta : style.en),
+        brandSub: style == null ? '' : (_tamil ? shop : 'by $shop'),
+        name: isGrid ? gridTitle : (_tamil && nameTa.isNotEmpty ? nameTa : nameEn),
+        otherName: isGrid ? gridSub : (nameTa.isEmpty || nameTa == nameEn ? '' : (_tamil ? nameEn : nameTa)),
+        price: _rs(now),
+        oldPrice: now < price ? _rs(price) : '',
+        save: now < price ? (_tamil ? '${_rs(price - now)} சேமிப்பு' : 'Save ${_rs(price - now)}') : '',
+        unit: _pack(p),
+        photo: _bytes(p['photo'] as String?),
+        logo: _bytes(brand == null ? null : (logos[brand] ?? '').toString()),
+        dark: style?.dark ?? _shopDark,
+        accent: style?.accent ?? _shopAccent,
+        extra: _extraText(coupon),
+        index: _page + 1,
+        total: _pages,
+        site: _siteLabel,
+        reply: _tamil ? 'ஆர்டர் செய்ய ஸ்டேட்டஸுக்கு பதில் அனுப்புங்கள்' : 'Reply "ORDER" to this status',
+        qr: posterIsSingle(_style) ? '$_site${_tamil ? '/ta' : ''}/?src=qr' : _linkFor(slugs, coupon, 'qr'),
+        tamil: _tamil,
+        background: _bgs[_style.name],
+        shop: shop,
+        items: [
+          for (var i = 0; i < chosen.length; i++)
+            PosterItem(
+              _tamil && tamilNameOf(chosen[i]).trim().isNotEmpty ? tamilNameOf(chosen[i]).trim() : (chosen[i]['name'] ?? '').toString().trim(),
+              _tamil ? (chosen[i]['name'] ?? '').toString().trim() : tamilNameOf(chosen[i]).trim(),
+              _rs(WebStoreService.webPriceOf(chosen[i])),
+              _pack(chosen[i]),
+              _bytes(chosen[i]['photo'] as String?),
+              _gridColors[i % _gridColors.length],
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _picture(Map<String, dynamic> store, List<Map<String, dynamic>> online, Map<String, String> slugs,
       Map<String, dynamic> coupon, String? brand, Map<String, dynamic> logos) {
@@ -642,17 +815,30 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
 
   Future<void> _share(Map<String, String> slugs, Map<String, dynamic> coupon) async {
     setState(() => _busy = true);
+    final shownPage = _page;
     try {
-      await Future<void>.delayed(const Duration(milliseconds: 60)); // let the picture finish drawing
-      final boundary = _cardKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) throw StateError('Picture not ready');
-      final image = await boundary.toImage(pixelRatio: 3);
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (bytes == null) throw StateError('Picture not ready');
+      // Offer with several products: one picture per product, in order.
+      final pages = _pages;
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/madhura_${_kind.name}_${DateTime.now().millisecondsSinceEpoch}.png');
-      await file.writeAsBytes(bytes.buffer.asUint8List());
-      await Share.shareXFiles([XFile(file.path)], text: _caption(slugs, coupon));
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final files = <XFile>[];
+      for (var i = 0; i < pages; i++) {
+        if (pages > 1) {
+          setState(() => _page = i);
+          await WidgetsBinding.instance.endOfFrame;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 120)); // let the picture finish drawing
+        final boundary = _cardKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+        if (boundary == null) throw StateError('Picture not ready');
+        final image = await boundary.toImage(pixelRatio: 3);
+        final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+        if (bytes == null) throw StateError('Picture not ready');
+        final file = File('${dir.path}/madhura_${_kind.name}_${stamp}_${i + 1}.png');
+        await file.writeAsBytes(bytes.buffer.asUint8List());
+        files.add(XFile(file.path));
+      }
+      if (pages > 1 && mounted) setState(() => _page = shownPage);
+      await Share.shareXFiles(files, text: _caption(slugs, coupon));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not make the picture: $e')));
