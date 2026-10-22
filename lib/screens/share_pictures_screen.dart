@@ -16,6 +16,8 @@ import '../utils/keyed_stream.dart';
 import '../utils/tamil_names.dart';
 import '../utils/user_role.dart';
 import 'poster_styles.dart';
+import 'reel_screen.dart';
+import 'reel_styles.dart';
 
 /// Ready-made pictures for WhatsApp Status, Instagram and groups:
 /// today's prices (one brand at a time), one product offer, or the
@@ -340,6 +342,15 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
                     ),
                   ),
                 ]),
+                if (_kind == _Kind.offer) ...[
+                  const SizedBox(height: 10),
+                  FilledButton.tonalIcon(
+                    onPressed: _busy || _offerIds.isEmpty ? null : () => _openReel(store, online, slugs, coupon, logos),
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                    icon: const Icon(Icons.movie_creation_outlined),
+                    label: Text('Make status video (${(_offerIds.length + 1) * 3} sec)'),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Text(
                   'Tip: post the picture, then "Share link" as a second Status — WhatsApp shows the link with your '
@@ -358,6 +369,59 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+
+  // ---------------- Video ----------------
+
+  /// Opens the video maker with the chosen offer products (3 s each).
+  void _openReel(Map<String, dynamic> store, List<Map<String, dynamic>> online, Map<String, String> slugs,
+      Map<String, dynamic> coupon, Map<String, dynamic> logos) {
+    final chosen = [for (final id in _offerIds) ...online.where((x) => x['id'] == id)];
+    if (chosen.isEmpty) return;
+    final brand = WebStoreService.brandOf(chosen.first);
+    final style = _brands[brand];
+    final local = (store['nameLocal'] ?? '').toString().trim();
+    final en = (store['name'] ?? '').toString().trim();
+    final shop = _tamil && local.isNotEmpty ? local : (en.isEmpty ? 'Sri Madhura Agro Traders' : en);
+    final products = <ReelProduct>[
+      for (var i = 0; i < chosen.length; i++)
+        () {
+          final p = chosen[i];
+          final nameEn = (p['name'] ?? '').toString().trim();
+          final nameTa = tamilNameOf(p).trim();
+          return ReelProduct(
+            id: (p['id'] ?? '$i').toString(),
+            name: _tamil && nameTa.isNotEmpty ? nameTa : nameEn,
+            otherName: nameTa.isEmpty || nameTa == nameEn ? '' : (_tamil ? nameEn : nameTa),
+            price: _rs(WebStoreService.webPriceOf(p)),
+            unit: _pack(p),
+            photo: _bytes(p['photo'] as String?),
+            style: reelMixOrder[i % reelMixOrder.length],
+          );
+        }(),
+    ];
+    final ta = _tamil ? '/ta' : '';
+    final slug = chosen.length == 1 ? slugs[chosen.first['id']] : null;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReelScreen(
+          products: products,
+          info: ReelInfo(
+            brand: style == null ? shop : (_tamil ? style.ta : style.en),
+            shop: shop,
+            site: _siteLabel,
+            qrLink: slug == null ? '$_site$ta/?src=qr' : '$_site$ta/p/$slug?src=qr',
+            logo: _bytes((logos[brand] ?? '').toString()),
+            tamil: _tamil,
+            dark: style?.dark ?? _shopDark,
+            accent: style?.accent ?? _shopAccent,
+            extra: _extraText(coupon),
+          ),
+          caption: _caption(slugs, coupon),
         ),
       ),
     );

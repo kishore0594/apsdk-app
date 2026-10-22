@@ -123,6 +123,7 @@ jobs:
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   setupNotifications(flutterEngine)
+                  setupVideo(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madhura/whatsapp")
                       .setMethodCallHandler { call, result ->
                           if (call.method != "sendImage") {
@@ -227,11 +228,295 @@ jobs:
                       }
               }
 
+              // Status videos: the app draws each frame, this turns them into one
+              // MP4 (H.264, 1080x1920, falls back to 720x1280 on older phones).
+              // Written in-house with Android's own MediaCodec, so no big plugin.
+              private val videoExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+              private var reelEncoder: ReelEncoder? = null
+
+              private fun setupVideo(flutterEngine: FlutterEngine) {
+                  val main = android.os.Handler(android.os.Looper.getMainLooper())
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madhura/video")
+                      .setMethodCallHandler { call, result ->
+                          val ok: (Any?) -> Unit = { v -> main.post { result.success(v) } }
+                          val fail: (Throwable) -> Unit = { e -> main.post { result.error("video_failed", e.message ?: e.toString(), null) } }
+                          when (call.method) {
+                              "start" -> {
+                                  val path = call.argument<String>("path") ?: ""
+                                  val fps = call.argument<Int>("fps") ?: 30
+                                  val bitrate = call.argument<Int>("bitrate") ?: 8000000
+                                  videoExecutor.execute {
+                                      try {
+                                          reelEncoder?.cancel()
+                                          reelEncoder = null
+                                          var enc: ReelEncoder? = null
+                                          var last: Throwable? = null
+                                          for (size in listOf(intArrayOf(1080, 1920), intArrayOf(720, 1280), intArrayOf(540, 960))) {
+                                              try {
+                                                  enc = ReelEncoder(path, size[0], size[1], fps, if (size[0] >= 1080) bitrate else bitrate / 2)
+                                                  break
+                                              } catch (e: Throwable) {
+                                                  last = e
+                                              }
+                                          }
+                                          val made = enc ?: throw (last ?: IllegalStateException("No video encoder on this phone"))
+                                          reelEncoder = made
+                                          ok(mapOf("width" to made.width, "height" to made.height))
+                                      } catch (e: Throwable) {
+                                          fail(e)
+                                      }
+                                  }
+                              }
+                              "frame" -> {
+                                  val bytes = call.argument<ByteArray>("rgba")
+                                  videoExecutor.execute {
+                                      try {
+                                          val enc = reelEncoder ?: throw IllegalStateException("Video not started")
+                                          enc.addFrame(bytes ?: throw IllegalArgumentException("No picture"))
+                                          ok(null)
+                                      } catch (e: Throwable) {
+                                          fail(e)
+                                      }
+                                  }
+                              }
+                              "finish" -> videoExecutor.execute {
+                                  try {
+                                      val enc = reelEncoder ?: throw IllegalStateException("Video not started")
+                                      enc.finish()
+                                      reelEncoder = null
+                                      ok(true)
+                                  } catch (e: Throwable) {
+                                      reelEncoder?.cancel()
+                                      reelEncoder = null
+                                      fail(e)
+                                  }
+                              }
+                              "cancel" -> videoExecutor.execute {
+                                  reelEncoder?.cancel()
+                                  reelEncoder = null
+                                  ok(true)
+                              }
+                              "save" -> {
+                                  val path = call.argument<String>("path") ?: ""
+                                  val name = call.argument<String>("name") ?: "madhura.mp4"
+                                  videoExecutor.execute {
+                                      try {
+                                          ok(saveVideo(path, name))
+                                      } catch (e: Throwable) {
+                                          fail(e)
+                                      }
+                                  }
+                              }
+                              else -> result.notImplemented()
+                          }
+                      }
+              }
+
+              // Copies the video into the phone's Movies/Madhura folder (Gallery).
+              private fun saveVideo(path: String, name: String): Boolean {
+                  val src = File(path)
+                  if (!src.exists()) return false
+                  if (Build.VERSION.SDK_INT >= 29) {
+                      val values = android.content.ContentValues().apply {
+                          put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name)
+                          put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                          put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Movies/Madhura")
+                          put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
+                      }
+                      val uri = contentResolver.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+                      contentResolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out) } }
+                      values.clear()
+                      values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                      contentResolver.update(uri, values, null, null)
+                      return true
+                  }
+                  @Suppress("DEPRECATION")
+                  val dir = File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MOVIES), "Madhura")
+                  dir.mkdirs()
+                  val out = File(dir, name)
+                  src.copyTo(out, overwrite = true)
+                  android.media.MediaScannerConnection.scanFile(this, arrayOf(out.absolutePath), arrayOf("video/mp4"), null)
+                  return true
+              }
+
               private fun isInstalled(pkg: String): Boolean = try {
                   packageManager.getPackageInfo(pkg, 0)
                   true
               } catch (e: PackageManager.NameNotFoundException) {
                   false
+              }
+          }
+          // Turns RGBA frames into an H.264 MP4 with MediaCodec + MediaMuxer.
+          class ReelEncoder(path: String, val width: Int, val height: Int, private val fps: Int, bitrate: Int) {
+              private val codec: android.media.MediaCodec
+              private val muxer: android.media.MediaMuxer
+              private val info = android.media.MediaCodec.BufferInfo()
+              private var track = -1
+              private var muxing = false
+              private var released = false
+              private var frames = 0L
+
+              init {
+                  val mime = android.media.MediaFormat.MIMETYPE_VIDEO_AVC
+                  val format = android.media.MediaFormat.createVideoFormat(mime, width, height)
+                  format.setInteger(
+                      android.media.MediaFormat.KEY_COLOR_FORMAT,
+                      android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+                  )
+                  format.setInteger(android.media.MediaFormat.KEY_BIT_RATE, bitrate)
+                  format.setInteger(android.media.MediaFormat.KEY_FRAME_RATE, fps)
+                  format.setInteger(android.media.MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+                  val c = android.media.MediaCodec.createEncoderByType(mime)
+                  try {
+                      val caps = c.codecInfo.getCapabilitiesForType(mime).videoCapabilities
+                      if (caps != null && !caps.isSizeSupported(width, height)) {
+                          throw IllegalArgumentException("Size " + width + "x" + height + " not supported")
+                      }
+                      c.configure(format, null, null, android.media.MediaCodec.CONFIGURE_FLAG_ENCODE)
+                      c.start()
+                  } catch (e: Throwable) {
+                      c.release()
+                      throw e
+                  }
+                  codec = c
+                  muxer = android.media.MediaMuxer(path, android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+              }
+
+              fun addFrame(rgba: ByteArray) {
+                  if (rgba.size < width * height * 4) throw IllegalArgumentException("Picture is the wrong size")
+                  var index = -1
+                  var tries = 0
+                  while (index < 0) {
+                      index = codec.dequeueInputBuffer(10000)
+                      if (index < 0) {
+                          drain(false)
+                          tries++
+                          if (tries > 500) throw IllegalStateException("Video encoder is not responding")
+                      }
+                  }
+                  val image = codec.getInputImage(index) ?: throw IllegalStateException("Video encoder gave no picture buffer")
+                  fillYuv(image, rgba)
+                  codec.queueInputBuffer(index, 0, width * height * 3 / 2, frames * 1000000L / fps, 0)
+                  frames++
+                  drain(false)
+              }
+
+              private fun fillYuv(image: android.media.Image, rgba: ByteArray) {
+                  val planes = image.planes
+                  val yBuf = planes[0].buffer
+                  val yRow = planes[0].rowStride
+                  val yPix = planes[0].pixelStride
+                  val uBuf = planes[1].buffer
+                  val uRow = planes[1].rowStride
+                  val uPix = planes[1].pixelStride
+                  val vBuf = planes[2].buffer
+                  val vRow = planes[2].rowStride
+                  val vPix = planes[2].pixelStride
+                  val w = width
+                  val h = height
+                  val row = ByteArray(w)
+                  for (y in 0 until h) {
+                      var i = y * w * 4
+                      for (x in 0 until w) {
+                          val r = rgba[i].toInt() and 0xff
+                          val g = rgba[i + 1].toInt() and 0xff
+                          val b = rgba[i + 2].toInt() and 0xff
+                          row[x] = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).toByte()
+                          i += 4
+                      }
+                      if (yPix == 1) {
+                          yBuf.position(y * yRow)
+                          yBuf.put(row, 0, w)
+                      } else {
+                          for (x in 0 until w) yBuf.put(y * yRow + x * yPix, row[x])
+                      }
+                  }
+                  for (y in 0 until h / 2) {
+                      for (x in 0 until w / 2) {
+                          val i = ((y * 2) * w + x * 2) * 4
+                          val r = rgba[i].toInt() and 0xff
+                          val g = rgba[i + 1].toInt() and 0xff
+                          val b = rgba[i + 2].toInt() and 0xff
+                          uBuf.put(y * uRow + x * uPix, (((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128).toByte())
+                          vBuf.put(y * vRow + x * vPix, (((112 * r - 94 * g - 18 * b + 128) shr 8) + 128).toByte())
+                      }
+                  }
+              }
+
+              private fun drain(end: Boolean) {
+                  var idle = 0
+                  while (true) {
+                      val index = codec.dequeueOutputBuffer(info, 10000)
+                      if (index == android.media.MediaCodec.INFO_TRY_AGAIN_LATER) {
+                          if (!end) return
+                          idle++
+                          if (idle > 300) return
+                      } else if (index == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                          if (!muxing) {
+                              track = muxer.addTrack(codec.outputFormat)
+                              muxer.start()
+                              muxing = true
+                          }
+                      } else if (index >= 0) {
+                          val buf = codec.getOutputBuffer(index)
+                          if ((info.flags and android.media.MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) info.size = 0
+                          if (info.size > 0 && muxing && buf != null) {
+                              buf.position(info.offset)
+                              buf.limit(info.offset + info.size)
+                              muxer.writeSampleData(track, buf, info)
+                          }
+                          codec.releaseOutputBuffer(index, false)
+                          if ((info.flags and android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) return
+                      }
+                  }
+              }
+
+              fun finish() {
+                  var index = -1
+                  var tries = 0
+                  while (index < 0 && tries < 500) {
+                      index = codec.dequeueInputBuffer(10000)
+                      if (index < 0) {
+                          drain(false)
+                          tries++
+                      }
+                  }
+                  if (index >= 0) {
+                      codec.queueInputBuffer(index, 0, 0, frames * 1000000L / fps, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                  }
+                  drain(true)
+                  if (!muxing) {
+                      release()
+                      throw IllegalStateException("The video came out empty")
+                  }
+                  release()
+              }
+
+              fun cancel() {
+                  try {
+                      release()
+                  } catch (e: Throwable) {
+                      // already stopped
+                  }
+              }
+
+              private fun release() {
+                  if (released) return
+                  released = true
+                  try {
+                      codec.stop()
+                  } catch (e: Throwable) {
+                      // not started
+                  }
+                  codec.release()
+                  if (muxing) {
+                      try {
+                          muxer.stop()
+                      } catch (e: Throwable) {
+                          // nothing written
+                      }
+                  }
+                  muxer.release()
               }
           }
           KTEOF
