@@ -11,6 +11,12 @@ const List<String> kExpenseCategories = [
   'Wages',
   'Transport',
   'Maintenance',
+  'Packing',
+  'Delivery',
+  'Online & payment fees',
+  'Phone & internet',
+  'Marketing',
+  'Bank charges',
   'Other',
 ];
 

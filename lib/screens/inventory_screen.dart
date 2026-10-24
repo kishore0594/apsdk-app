@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/pricing.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 import '../db/db_helper.dart';
@@ -341,6 +342,47 @@ class _ProductFormState extends State<_ProductForm> {
   String? _supplierId;
   List<Map<String, dynamic>> _suppliers = [];
   String? _photoBase64;
+  Pricing? _pricing;
+
+  /// Live margin and the suggested shop / online prices from the
+  /// category's margin target, shown under the price fields.
+  Widget _priceHint() {
+    final pr = _pricing;
+    final cost = double.tryParse(_costPrice.text) ?? 0;
+    if (pr == null || cost <= 0) return const SizedBox.shrink();
+    final cat = _category.text.trim();
+    final price = double.tryParse(_sellingPrice.text) ?? 0;
+    final target = pr.target(cat);
+    final shop = pr.suggestShop(cost, cat);
+    final online = pr.suggestOnline(cost, cat, perKg: RegExp(r'^\s*kg', caseSensitive: false).hasMatch(_unit));
+    final m = Pricing.margin(price, cost);
+    final ok = m >= target - 0.5;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: (ok ? Colors.green : Colors.orange).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          '${cat.isEmpty ? 'Margin target' : '$cat target'} ${target.toStringAsFixed(0)}%'
+          '${price > 0 ? ' · your price gives ${m.toStringAsFixed(1)}%${ok ? ' ✓' : ' — below target'}' : ''}',
+          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ok ? Colors.green.shade800 : Colors.orange.shade900),
+        ),
+        const SizedBox(height: 4),
+        Row(children: [
+          Expanded(child: Text('Suggested shop price ₹${shop.toStringAsFixed(0)}', style: const TextStyle(fontSize: 12.5))),
+          TextButton(
+            onPressed: () => _sellingPrice.text = shop.toStringAsFixed(0),
+            child: const Text('Use'),
+          ),
+        ]),
+        Text('Suggested online price ₹${online.toStringAsFixed(0)} (covers packing, fees and risk — set it in Web Store or Pricing)',
+            style: const TextStyle(fontSize: 12, color: Colors.black54)),
+      ]),
+    );
+  }
 
   @override
   void initState() {
@@ -358,6 +400,11 @@ class _ProductFormState extends State<_ProductForm> {
     // the field appears/disappears live as they type, not just on save.
     _costPrice.addListener(() => setState(() {}));
     _sellingPrice = TextEditingController(text: (p?['selling_price'] ?? 0).toString());
+    _sellingPrice.addListener(() => setState(() {}));
+    _category.addListener(() => setState(() {}));
+    Pricing.load().then((v) {
+      if (mounted) setState(() => _pricing = v);
+    }).catchError((_) {});
     _supplierId = p?['supplier_id'] as String?;
     _photoBase64 = p?['photo'] as String?;
     _loadSuppliers();
@@ -444,7 +491,11 @@ class _ProductFormState extends State<_ProductForm> {
       if (proceed != true) return;
     }
     final now = DateTime.now().toIso8601String();
+    final oldCost = (widget.product?['cost_price'] as num?)?.toDouble() ?? 0;
     final data = {
+      if (widget.product != null && oldCost > 0 && (oldCost - costPrice).abs() > 0.009) 'cost_prev': oldCost,
+      if (widget.product != null && oldCost > 0 && (oldCost - costPrice).abs() > 0.009)
+        'cost_changed_at': DateTime.now().toIso8601String(),
       'name': _name.text.trim(),
       'category': _category.text.trim(),
       'subcategory': _subcategory.text.trim(),
@@ -605,6 +656,7 @@ class _ProductFormState extends State<_ProductForm> {
                   ),
                 ],
               ),
+              _priceHint(),
               if ((double.tryParse(_costPrice.text) ?? 0) <= 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),

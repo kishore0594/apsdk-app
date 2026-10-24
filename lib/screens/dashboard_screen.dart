@@ -19,7 +19,7 @@ import 'online_orders_screen.dart';
 import 'todays_collections_screen.dart';
 import 'data_sync_screen.dart';
 import 'suppliers_screen.dart';
-import 'reports_screen.dart';
+import 'finance_screen.dart';
 import 'inventory_screen.dart';
 import 'expenses_screen.dart';
 import 'change_password_screen.dart';
@@ -553,7 +553,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           icon: Icons.trending_up,
                           color: Colors.teal,
                           onTap: () => Navigator.push(context,
-                              MaterialPageRoute(builder: (_) => const ReportsScreen())),
+                              MaterialPageRoute(builder: (_) => const FinanceScreen())),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -729,7 +729,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             ListTile(
               leading: const IconBadge(icon: Icons.percent, color: AppTheme.profit, size: 18),
-              title: const Text('Profit Margins'),
+              title: const Text('Pricing & margins'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductMarginsScreen()));
@@ -756,7 +756,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               title: Text(AppStrings.t('reports_trends')),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsScreen()));
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const FinanceScreen()));
               },
             ),
             ListTile(

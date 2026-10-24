@@ -689,6 +689,22 @@ class WebStoreService {
     return 'fs:$key:$v';
   }
 
+  /// The picture behind an "fs:<key>:<version>" reference (e.g. the
+  /// payment QR), or null.
+  Future<Uint8List?> siteImageBytes(String? ref) async {
+    if (ref == null || !ref.startsWith('fs:')) return null;
+    final parts = ref.split(':');
+    if (parts.length < 2 || parts[1].isEmpty) return null;
+    try {
+      final doc = await _images.doc(parts[1]).get();
+      final data = (doc.data() as Map<String, dynamic>?)?['data'] as String?;
+      if (data == null || data.isEmpty) return null;
+      return base64Decode(data.replaceFirst(RegExp(r'^data:image/\w+;base64,'), ''));
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> deleteSiteImage(String? ref) async {
     if (ref == null || !ref.startsWith('fs:')) return;
     final parts = ref.split(':');

@@ -437,9 +437,13 @@ class DBHelper {
       final pid = item['product_id'] as String?;
       if (pid != null && productRefs.containsKey(pid)) {
         final current = (productData[pid]!['quantity'] as num?)?.toDouble() ?? 0;
+        final oldCost = (productData[pid]!['cost_price'] as num?)?.toDouble() ?? 0;
         batch.update(productRefs[pid]!, {
           'quantity': FieldValue.increment(qty),
           'cost_price': cost,
+          // Remembered so Pricing can say "cost went up from ₹X".
+          if (oldCost > 0 && (oldCost - cost).abs() > 0.009) 'cost_prev': oldCost,
+          if (oldCost > 0 && (oldCost - cost).abs() > 0.009) 'cost_changed_at': now,
           'updated_at': now,
         });
         batch.set(_stockMovements.doc(), {
@@ -1617,6 +1621,76 @@ class DBHelper {
       total += (data['balance'] as num?)?.toDouble() ?? 0;
     }
     return total;
+  }
+
+  // ---------------- FINANCIAL STATEMENTS ----------------
+  // Reports & Trends (Financial statements) reads every record once and
+  // works out each month / quarter / year on the phone. Targets, fixed
+  // monthly expenses and the starting cash live in app_settings/finance,
+  // shared by both phones.
+
+  DocumentReference get _financeSettings => _fs.collection('app_settings').doc('finance');
+
+  Future<Map<String, dynamic>> getFinanceSettings() async {
+    final doc = await _financeSettings.get();
+    return (doc.data() as Map<String, dynamic>?) ?? {};
+  }
+
+  Future<void> saveFinanceSettings(Map<String, dynamic> data) async {
+    await _write(_financeSettings.set(data, SetOptions(merge: true)));
+  }
+
+  /// Saves the whole settings document (so removed fixed costs go away).
+  Future<void> replaceFinanceSettings(Map<String, dynamic> data) async {
+    await _write(_financeSettings.set(data));
+  }
+
+  /// Every record the financial statements need, read in one go.
+  Future<Map<String, List<Map<String, dynamic>>>> getFinanceRaw() async {
+    final snaps = await Future.wait([
+      _sales.get(),
+      _saleItems.get(),
+      _expenses.get(),
+      _creditTxns.get(),
+      _supplierTxns.get(),
+      _stockMovements.get(),
+      _products.get(),
+      _vendors.get(),
+      _suppliers.get(),
+    ]);
+    const keys = ['sales', 'items', 'expenses', 'credit', 'supplier_txns', 'movements', 'products', 'vendors', 'suppliers'];
+    return {for (var i = 0; i < keys.length; i++) keys[i]: _fromSnapshot(snaps[i])};
+  }
+
+  /// Writes off credit that will never be paid: lowers what the customer
+  /// owes (like a payment, but no cash) and shows as a bad debt in the
+  /// Profit & Loss.
+  Future<void> writeOffBadDebt({required String vendorId, required double amount, String? notes}) async {
+    final vendorRef = _vendors.doc(vendorId);
+    final snap = await vendorRef.get();
+    final data = snap.data() as Map<String, dynamic>? ?? {};
+    final current = (data['balance'] as num?)?.toDouble() ?? 0;
+    final newBalance = current - amount;
+    final batch = _fs.batch();
+    batch.set(_creditTxns.doc(), {
+      'vendor_id': vendorId,
+      'vendor_name': data['name'],
+      'date': DateTime.now().toIso8601String(),
+      'type': 'ADJUSTMENT',
+      'amount': amount,
+      'balance_after': newBalance,
+      'notes': notes ?? 'Bad debt written off',
+      'bad_debt': true,
+    });
+    batch.update(vendorRef, {'balance': FieldValue.increment(-amount)});
+    await _write(batch.commit());
+  }
+
+  /// A fixed monthly expense (rent, salary...) saved under a fixed id
+  /// ("fixed_<head>_<yyyy-mm>"), so posting it twice — or from two
+  /// phones — never counts it twice.
+  Future<void> setFixedExpense(String id, Map<String, dynamic> data) async {
+    await _write(_expenses.doc(id).set(data));
   }
 
   // ---------------- DATA EXPORT (full dump, all tables) ----------------

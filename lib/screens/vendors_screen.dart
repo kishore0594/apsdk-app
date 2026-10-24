@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'ledger_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
@@ -257,6 +258,31 @@ class _VendorsScreenState extends State<VendorsScreen> {
   /// same as typing the message by hand, just without retyping it each
   /// time.
   Future<void> _sendWhatsAppReminder(Map<String, dynamic> v) async {
+    // Statement picture (bills, items, balance, UPI QR) or the short text.
+    final kind = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.receipt_long, color: Color(0xFF1F5A2A)),
+            title: const Text('Account statement picture'),
+            subtitle: const Text('Bills with items, payments, balance and your UPI QR'),
+            onTap: () => Navigator.pop(ctx, 'statement'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.chat_outlined),
+            title: const Text('Short text reminder'),
+            onTap: () => Navigator.pop(ctx, 'text'),
+          ),
+        ]),
+      ),
+    );
+    if (kind == null || !mounted) return;
+    if (kind == 'statement') {
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => LedgerScreen(vendor: v)));
+      return;
+    }
     final phone = (v['phone'] as String? ?? '').trim();
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context)
@@ -973,7 +999,17 @@ class _VendorDetailScreenState extends State<VendorDetailScreen> {
   Widget build(BuildContext context) {
     final vendorId = widget.vendor['id'] as String;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.vendor['name'] as String)),
+      appBar: AppBar(
+        title: Text(widget.vendor['name'] as String),
+        actions: [
+          IconButton(
+            tooltip: 'Account statement for WhatsApp',
+            icon: const Icon(Icons.receipt_long),
+            onPressed: () => Navigator.push(
+                context, MaterialPageRoute(builder: (_) => LedgerScreen(vendor: widget.vendor))),
+          ),
+        ],
+      ),
       body: StreamBuilder<Map<String, dynamic>?>(
         stream: _vendorStream.get(vendorId, () => _db.watchVendor(vendorId)),
         builder: (context, vendorSnap) {

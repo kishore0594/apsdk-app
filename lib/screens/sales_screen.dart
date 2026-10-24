@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:convert';
 import '../db/db_helper.dart';
+import '../services/pricing.dart';
 import '../utils/formatters.dart';
 import '../utils/app_strings.dart';
 import '../utils/app_theme.dart';
@@ -506,10 +507,24 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
   final _discountCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
 
+  Pricing? _pricing;
+
   @override
   void initState() {
     super.initState();
     _loadData();
+    Pricing.load().then((v) {
+      if (mounted) setState(() => _pricing = v);
+    }).catchError((_) {});
+  }
+
+  /// Value lost while a credit bill waits to be paid (inflation × days).
+  double get _creditCost {
+    final pr = _pricing;
+    if (pr == null || _paymentType == 'CASH') return 0;
+    final paid = double.tryParse(_paidCtrl.text) ?? 0;
+    final credit = (_total - paid).clamp(0, double.infinity).toDouble();
+    return credit * pr.s.realInflation / 100 * pr.s.creditDelayDays / 365;
   }
 
   Future<void> _loadData() async {
@@ -662,6 +677,26 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
     }
     final paid = _paymentType == 'CASH' ? _total : (double.tryParse(_paidCtrl.text) ?? 0);
 
+    // Discount guard: a bill below the lowest allowed margin needs a yes.
+    final minMargin = _pricing?.s.billMinMargin;
+    if (minMargin != null && _discount > 0 && !_hasIncompleteCostData && _marginAfterDiscount < minMargin) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Discount too deep?'),
+          content: Text('After the ${formatCurrency(_discount)} discount this bill earns '
+              '${_marginAfterDiscount.toStringAsFixed(1)}% (${formatCurrency(_profitAfterDiscount)}), below your '
+              '${minMargin.toStringAsFixed(0)}% minimum. Save anyway?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Change discount')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save anyway')),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+    if (!mounted) return;
+
     setState(() => _saving = true);
     try {
       await _db
@@ -743,6 +778,16 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
             ],
           ),
           Text('Margin before → after discount', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+          if (_creditCost >= 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'On credit for about ${_pricing!.s.creditDelayDays.round()} days this costs about '
+                '${formatCurrency(_creditCost)} in lost value — profit after that '
+                '${formatCurrency(_profitAfterDiscount - _creditCost)}',
+                style: TextStyle(fontSize: 11.5, color: Colors.orange.shade900, fontWeight: FontWeight.w600),
+              ),
+            ),
           if (after < 0)
             const Padding(
               padding: EdgeInsets.only(top: 4),

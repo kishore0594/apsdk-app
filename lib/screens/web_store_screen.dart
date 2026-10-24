@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/web_store_service.dart';
+import '../services/pricing.dart';
 import '../utils/app_theme.dart';
 import '../utils/formatters.dart';
 import '../utils/keyed_stream.dart';
@@ -913,6 +914,32 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
     if (offerV > 0 && offerV >= price && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Offer price must be lower than the selling price — offer not saved.')));
+    }
+    // Margin guard: what's left online after packing, payment fee and
+    // risk must not drop below the lowest margin allowed.
+    final cost = (p['cost_price'] as num?)?.toDouble() ?? 0;
+    if (cost > 0) {
+      try {
+        final pr = await Pricing.load();
+        final sells = (offerV > 0 && offerV < price) ? offerV : price;
+        final m = pr.onlineMargin(sells, cost, perKg: byWeight);
+        if (m < pr.s.billMinMargin && mounted) {
+          final go = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Low online margin'),
+              content: Text('At ₹${sells.toStringAsFixed(0)} the online margin is ${m.toStringAsFixed(1)}% after packing '
+                  '(₹${pr.s.onlinePackCost.round()}), payment fee and risk — below your ${pr.s.billMinMargin.toStringAsFixed(0)}% '
+                  'minimum. Suggested online price: ₹${pr.suggestOnline(cost, (p['category'] ?? '').toString(), perKg: byWeight).toStringAsFixed(0)}.'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Don't save")),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save anyway')),
+              ],
+            ),
+          );
+          if (go != true) return;
+        }
+      } catch (_) {/* no settings yet: save as before */}
     }
     await _svc.updateProductWeb(p['id'] as String, {
       'web_price': onlineV > 0 ? onlineV : 0,
