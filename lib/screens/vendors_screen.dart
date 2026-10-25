@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'ledger_screen.dart';
+import 'hub_bar.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
 import '../utils/formatters.dart';
@@ -769,6 +770,7 @@ class _VendorsScreenState extends State<VendorsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(AppStrings.t('vendor_credit')),
+        bottom: HubBar(customerLinks()),
         actions: [
           if (UserRole.instance.isAdmin)
             IconButton(

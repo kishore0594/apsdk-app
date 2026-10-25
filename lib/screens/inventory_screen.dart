@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'hub_bar.dart';
 import '../services/pricing.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
@@ -140,7 +141,10 @@ class _InventoryScreenState extends State<InventoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(AppStrings.t('inventory_title'))),
+      appBar: AppBar(
+        title: Text(AppStrings.t('inventory_title')),
+        bottom: widget.initialCategoryFilter == null ? HubBar(stockLinks()) : null,
+      ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _productsStream,
         builder: (context, snapshot) {
@@ -315,6 +319,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
           : null,
     );
   }
+}
+
+/// Opens the Inventory edit form for one product (used by the Pricing
+/// screen). Returns when the form is closed.
+Future<void> openProductEditor(BuildContext context, Map<String, dynamic> product) async {
+  await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) => _ProductForm(product: product),
+  );
 }
 
 class _ProductForm extends StatefulWidget {

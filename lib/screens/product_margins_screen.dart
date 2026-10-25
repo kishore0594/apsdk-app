@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../db/db_helper.dart';
 import '../services/finance_service.dart';
 import '../services/pricing.dart';
@@ -7,6 +8,7 @@ import '../utils/app_theme.dart';
 import '../utils/user_role.dart';
 import 'finance_screen.dart' show rs, pct, lightColor;
 import 'finance_settings_screen.dart';
+import 'inventory_screen.dart' show openProductEditor;
 
 /// Pricing: every product's shop (offline) and online margin against its
 /// target, with the suggested prices and one tap to apply them. Online
@@ -28,11 +30,30 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
   bool _loading = true;
   String _search = '';
   _Filter _filter = _Filter.below;
+  String _cat = ''; // '' = all categories (lower-case key otherwise)
+  static const _catKey = 'pricing_category';
 
   @override
   void initState() {
     super.initState();
+    _restoreCat();
     _load();
+  }
+
+  Future<void> _restoreCat() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getString(_catKey) ?? '';
+      if (mounted && v != _cat) setState(() => _cat = v);
+    } catch (_) {}
+  }
+
+  Future<void> _setCat(String v) async {
+    setState(() => _cat = v);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_catKey, v);
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -84,6 +105,7 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
 
   bool _matches(_Row r) {
     if (_search.isNotEmpty && !(r.p['name'] ?? '').toString().toLowerCase().contains(_search)) return false;
+    if (_cat.isNotEmpty && r.category.toLowerCase() != _cat) return false;
     switch (_filter) {
       case _Filter.below:
         return r.cost > 0 && (r.shopBelow || r.webBelow);
@@ -108,6 +130,89 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
     await WebStoreService.instance.updateProductWeb(r.p['id'] as String, {'web_price': r.suggestWeb});
     r.p['web_price'] = r.suggestWeb;
     setState(() {});
+  }
+
+  Future<void> _setShop(_Row r, double v) async {
+    await _db.updateProduct(r.p['id'] as String, {'selling_price': v});
+    r.p['selling_price'] = v;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _setWeb(_Row r, double v) async {
+    await WebStoreService.instance.updateProductWeb(r.p['id'] as String, {'web_price': v});
+    r.p['web_price'] = v;
+    if (mounted) setState(() {});
+  }
+
+  /// Type any price — up or down — and see the margin before saving.
+  Future<void> _editPrice(_Row r, {required bool web}) async {
+    final pr = _pricing!;
+    final floor = pr.s.billMinMargin;
+    final start = web ? r.web : r.shop;
+    final ctl = TextEditingController(text: start > 0 ? start.toStringAsFixed(start % 1 == 0 ? 0 : 2) : '');
+    double marginOf(double v) => web ? pr.onlineMargin(v, r.cost, perKg: r.perKg) : Pricing.margin(v, r.cost);
+    final v = await showDialog<double>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
+        final x = double.tryParse(ctl.text.trim()) ?? 0.0;
+        final m = marginOf(x);
+        final c = r.cost <= 0 ? Colors.blueGrey : lightColor(Pricing.light(m, r.target, floor));
+        return AlertDialog(
+          title: Text('${web ? 'Online' : 'Shop'} price — ${(r.p['name'] ?? '').toString()}'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            TextField(
+              controller: ctl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(prefixText: '₹ ', labelText: 'New price', border: OutlineInputBorder()),
+              onChanged: (_) => setD(() {}),
+            ),
+            const SizedBox(height: 10),
+            if (r.cost > 0 && x > 0)
+              Text('Margin ${pct(m)}  (target ${pct(r.target)})',
+                  style: TextStyle(fontWeight: FontWeight.w800, color: c)),
+            if (r.cost > 0 && x > 0 && m < floor)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('⚠ Below your ${pct(floor)} minimum margin',
+                    style: TextStyle(color: lightColor(Light.red), fontSize: 12.5)),
+              ),
+            const SizedBox(height: 6),
+            Text('Suggested: ${rs(web ? r.suggestWeb : r.suggestShop)}',
+                style: const TextStyle(fontSize: 12.5, color: Colors.black54)),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(onPressed: x > 0 ? () => Navigator.pop(ctx, x) : null, child: const Text('Save')),
+          ],
+        );
+      }),
+    );
+    if (v == null || v <= 0 || v == start) return;
+    if (r.cost > 0 && marginOf(v) < floor) {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Margin below minimum'),
+          content: Text('At ${rs(v)} the margin is ${pct(marginOf(v))}, below your ${pct(floor)} minimum. Save anyway?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Don't save")),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save anyway')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    web ? await _setWeb(r, v) : await _setShop(r, v);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Price saved: ${rs(v)}')));
+    }
+  }
+
+  Future<void> _openInInventory(_Row r) async {
+    await openProductEditor(context, r.p);
+    _load();
   }
 
   Future<void> _applyAll(List<_Row> rows) async {
@@ -147,10 +252,17 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
   Widget build(BuildContext context) {
     final pr = _pricing;
     final all = pr == null ? <_Row>[] : _products.map(_row).toList();
+    final catNames = <String, String>{};
+    for (final r in all) {
+      if (r.category.isNotEmpty) catNames.putIfAbsent(r.category.toLowerCase(), () => r.category);
+    }
+    final catKeys = catNames.keys.toList()..sort();
+    if (_cat.isNotEmpty && pr != null && !catNames.containsKey(_cat)) _cat = '';
     final rows = all.where(_matches).toList()
       ..sort((a, b) => (a.worstGap).compareTo(b.worstGap));
-    final below = all.where((r) => r.cost > 0 && (r.shopBelow || r.webBelow)).length;
-    final noCost = all.where((r) => r.cost <= 0).length;
+    final inCat = _cat.isEmpty ? all : all.where((r) => r.category.toLowerCase() == _cat).toList();
+    final below = inCat.where((r) => r.cost > 0 && (r.shopBelow || r.webBelow)).length;
+    final noCost = inCat.where((r) => r.cost <= 0).length;
     final admin = UserRole.instance.isAdmin;
     return Scaffold(
       backgroundColor: AppTheme.scaffold,
@@ -194,6 +306,30 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  key: ValueKey('cat-$_cat'),
+                  value: _cat,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Category',
+                    prefixIcon: Icon(Icons.category_outlined),
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    DropdownMenuItem(value: '', child: Text('All categories (${all.length})')),
+                    for (final k in catKeys)
+                      DropdownMenuItem(
+                        value: k,
+                        child: Text(
+                            '${catNames[k]}  ·  target ${pct(pr.target(catNames[k]!))}  ·  '
+                            '${all.where((r) => r.category.toLowerCase() == k).length} items',
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  onChanged: (v) => _setCat(v ?? ''),
+                ),
+                const SizedBox(height: 6),
                 Wrap(spacing: 6, children: [
                   for (final f in _Filter.values)
                     ChoiceChip(
@@ -226,7 +362,10 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
     final floor = _pricing!.s.billMinMargin;
     final unit = (r.p['unit'] ?? '').toString();
     final per = unit.isEmpty ? '' : ' / $unit';
-    Widget priceLine(String label, double price, double margin, double suggest, bool below, VoidCallback onApply) {
+    Widget priceLine(String label, double price, double margin, double suggest, bool below, VoidCallback onApply,
+        VoidCallback onEdit) {
+      // well above target → offer to come down to the suggested price
+      final canLower = r.cost > 0 && !below && suggest > 0 && suggest < price && margin > r.target + 5;
       final c = r.cost <= 0 ? Colors.blueGrey : lightColor(Pricing.light(margin, r.target, floor));
       return Padding(
         padding: const EdgeInsets.only(top: 6),
@@ -246,16 +385,47 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
                     child: Text('Use ${rs(suggest)}'),
                   )
                 : Text('Suggest ${rs(suggest)}', style: const TextStyle(fontSize: 12.5)),
+          if (canLower)
+            admin
+                ? TextButton(
+                    onPressed: onApply,
+                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                    child: Text('Lower to ${rs(suggest)}'),
+                  )
+                : Text('Could be ${rs(suggest)}', style: const TextStyle(fontSize: 12.5)),
+          if (admin)
+            IconButton(
+              tooltip: 'Change price',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.edit_outlined, size: 20),
+              onPressed: onEdit,
+            ),
         ]),
       );
     }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: admin ? () => _openInInventory(r) : null,
+        child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text((r.p['name'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
+          Row(children: [
+            Expanded(
+              child: Text((r.p['name'] ?? '').toString(),
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
+            ),
+            if (admin)
+              const Padding(
+                padding: EdgeInsets.only(right: 8),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('Inventory', style: TextStyle(fontSize: 11.5, color: AppTheme.primary, fontWeight: FontWeight.w600)),
+                  Icon(Icons.chevron_right, size: 18, color: AppTheme.primary),
+                ]),
+              ),
+          ]),
           Text(
             '${r.category.isEmpty ? 'No category' : r.category} · target ${pct(r.target)} · '
             '${r.cost > 0 ? 'cost ${rs(r.cost)}$per' : 'no cost price — add it in Inventory'}'
@@ -264,9 +434,11 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
                 fontSize: 12,
                 color: r.costPrev > 0 && r.cost > r.costPrev ? lightColor(Light.orange) : Colors.black54),
           ),
-          priceLine('Shop', r.shop, r.shopMargin, r.suggestShop, r.shopBelow, () => _applyShop(r)),
+          priceLine('Shop', r.shop, r.shopMargin, r.suggestShop, r.shopBelow, () => _applyShop(r),
+              () => _editPrice(r, web: false)),
           if (r.online)
-            priceLine('Online', r.web, r.webMargin, r.suggestWeb, r.webBelow, () => _applyWeb(r)),
+            priceLine('Online', r.web, r.webMargin, r.suggestWeb, r.webBelow, () => _applyWeb(r),
+                () => _editPrice(r, web: true)),
           if (r.online && r.offer > 0)
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 56),
@@ -278,6 +450,7 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
             ),
           if (r.online && r.perKg && r.cost > 0) _packs(r),
         ]),
+        ),
       ),
     );
   }

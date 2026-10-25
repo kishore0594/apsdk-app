@@ -21,10 +21,11 @@ class AppStrings {
   static const Map<String, Map<String, String>> _translations = {
     'en': {
       // Navigation
-      'nav_home': 'Home',
+      'nav_home': 'Today',
+      'nav_marketing': 'Marketing',
       'nav_sales': 'Sales',
-      'nav_inventory': 'Inventory',
-      'nav_credit': 'Credit',
+      'nav_inventory': 'Stock',
+      'nav_credit': 'Customers',
       'nav_suppliers': 'Suppliers',
 
       // Login
@@ -247,10 +248,11 @@ class AppStrings {
     },
     'ta': {
       // Navigation
-      'nav_home': 'முகப்பு',
+      'nav_home': 'இன்று',
+      'nav_marketing': 'விளம்பரம்',
       'nav_sales': 'விற்பனை',
       'nav_inventory': 'சரக்கு',
-      'nav_credit': 'கடன்',
+      'nav_credit': 'வாடிக்கையாளர்',
       'nav_suppliers': 'சப்ளையர்கள்',
 
       // Login

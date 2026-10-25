@@ -314,6 +314,7 @@ class FinRow {
   double cost = 0;
   double prevSales = 0;
   double prevCost = 0;
+  double discount = 0; // bill discounts shared to this item / category
   bool costMissing = false;
   // stock
   double stockQty = 0;
@@ -436,6 +437,7 @@ class FinanceService {
         qty: qty,
         sales: _n(i['subtotal']) * f,
         cost: qty * unitCost,
+        discount: _n(i['subtotal']) * (1 - f),
         costMissing: unitCost <= 0,
       ));
     }
@@ -666,6 +668,7 @@ class FinanceService {
         r.qty += i.qty;
         r.sales += i.sales;
         r.cost += i.cost;
+        r.discount += i.discount;
         if (i.costMissing) r.costMissing = true;
       } else {
         r.prevSales += i.sales;
@@ -1042,9 +1045,10 @@ class _Sale {
 class _Item {
   final DateTime date;
   final String key, name, group;
-  final double qty, sales, cost;
+  final double qty, sales, cost, discount;
   final bool costMissing;
   _Item({
+    this.discount = 0,
     required this.date,
     required this.key,
     required this.name,

@@ -14,7 +14,6 @@ import 'sales_screen.dart';
 import 'vendors_screen.dart';
 import 'vendor_insights_screen.dart';
 import 'product_margins_screen.dart';
-import 'web_store_screen.dart';
 import 'online_orders_screen.dart';
 import 'todays_collections_screen.dart';
 import 'data_sync_screen.dart';
@@ -23,9 +22,15 @@ import 'finance_screen.dart';
 import 'inventory_screen.dart';
 import 'expenses_screen.dart';
 import 'change_password_screen.dart';
-import 'promotions_screen.dart';
 import 'manage_users_screen.dart';
 import '../utils/chart_style.dart';
+import '../services/customer_pattern.dart';
+import '../services/finance_service.dart';
+import '../services/pricing.dart';
+import '../services/web_store_service.dart';
+import 'buying_pattern.dart' show PatternStore;
+import 'hub_bar.dart' show newOrdersBadge;
+import 'share_pictures_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -69,6 +74,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _todaysGrossProfit = 0;
   List<Map<String, dynamic>> _lowStock = [];
   List<Map<String, dynamic>> _agingVendors = [];
+  PatternSummary? _patterns;
+  Pricing? _pricing;
+  int _belowTarget = 0;
+  int _newOrderCount = 0;
+  StreamSubscription<int>? _ordersSub;
   List<Map<String, dynamic>> _weeklySales = [];
 
   // Sales breakdown (pie charts) state
@@ -111,6 +121,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _ordersSub = newOrdersBadge().listen((n) {
+      if (mounted) setState(() => _newOrderCount = n);
+    }, onError: (_) {});
+    Pricing.load().then((p) {
+      _pricing = p;
+      _scheduleRecompute();
+    }).catchError((_) {});
     _salesSub = _db.watchSalesRaw().listen(
       (snap) {
         _rawSales = _snapToList(snap);
@@ -184,6 +201,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _recomputeDebounce?.cancel();
+    _ordersSub?.cancel();
     _salesSub?.cancel();
     _saleItemsSub?.cancel();
     _creditTxnsSub?.cancel();
@@ -311,7 +329,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final paymentWiseData =
         paymentTotals.entries.map((e) => {'payment_type': e.key, 'total': e.value}).toList();
 
+    // Customer buying patterns (late / due this week) — shared with
+    // Vendor Insights so both show the same numbers.
+    PatternSummary? patterns;
+    try {
+      final cp = CustomerPatterns.build(
+        vendors: _rawVendors,
+        sales: _rawSales,
+        items: _rawSaleItems,
+        credit: _rawCreditTxns,
+        products: _rawProducts,
+      );
+      PatternStore.put(cp);
+      patterns = cp.summary;
+    } catch (_) {}
+    // Products priced below their margin target (shop or online).
+    var belowTarget = 0;
+    final pr = _pricing;
+    if (pr != null) {
+      for (final p in _rawProducts) {
+        final cost = (p['cost_price'] as num?)?.toDouble() ?? 0.0;
+        if (cost <= 0) continue;
+        final cat = FinanceService.tidy(p['category'] as String?);
+        final t = pr.target(cat);
+        final shop = (p['selling_price'] as num?)?.toDouble() ?? 0.0;
+        var below = shop > 0 && Pricing.margin(shop, cost) < t - 0.5 && pr.suggestShop(cost, cat) > shop;
+        if (!below && WebStoreService.isOnline(p)) {
+          final web = WebStoreService.priceOf(p);
+          final perKg = FinanceService.perKgUnit(p);
+          below = web > 0 && pr.onlineMargin(web, cost, perKg: perKg) < t - 0.5 && pr.suggestOnline(cost, cat, perKg: perKg) > web;
+        }
+        if (below) belowTarget++;
+      }
+    }
+
     setState(() {
+      _patterns = patterns;
+      _belowTarget = belowTarget;
       _todaysSales = todaysSales;
       _todaysCollections = todaysCollections;
       _outstandingCredit = outstandingCredit;
@@ -353,6 +407,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
         endExclusive = start.add(const Duration(days: 1));
     }
     return (start.toIso8601String(), endExclusive.toIso8601String());
+  }
+
+  Future<void> _signOut() async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: Text(AppStrings.t('sign_out_confirm')),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('sign_out'))),
+                  ],
+                ),
+              );
+              if (confirm == true) {
+                // Locks the app on this device instead of destroying the
+                // Firebase session — so signing back in works offline
+                // (see SessionLock). The session and any unsynced sales
+                // stay safe underneath.
+                UserRole.instance.reset();
+                await SessionLock.instance.lock();
+              }
   }
 
   Future<void> _pickLanguage() async {
@@ -441,35 +518,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           const NewOrdersBell(),
           IconButton(
-            tooltip: AppStrings.t('language'),
-            icon: const Icon(Icons.language),
-            onPressed: _pickLanguage,
-          ),
-          IconButton(
-            tooltip: AppStrings.t('sign_out'),
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (_) => AlertDialog(
-                  title: Text(AppStrings.t('sign_out_confirm')),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(context, false), child: Text(AppStrings.t('cancel'))),
-                    FilledButton(
-                        onPressed: () => Navigator.pop(context, true), child: Text(AppStrings.t('sign_out'))),
-                  ],
-                ),
-              );
-              if (confirm == true) {
-                // Locks the app on this device instead of destroying the
-                // Firebase session — so signing back in works offline
-                // (see SessionLock). The session and any unsynced sales
-                // stay safe underneath.
-                UserRole.instance.reset();
-                await SessionLock.instance.lock();
-              }
-            },
+            tooltip: 'Menu — accounts & settings',
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
           ),
         ],
       ),
@@ -508,6 +559,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  _todo(context),
                   Row(
                     children: [
                       Expanded(
@@ -707,123 +759,176 @@ class _DashboardScreenState extends State<DashboardScreen> {
   /// Export, and the Low Stock list) so the Dashboard itself stays to
   /// just its core at-a-glance numbers.
   Widget _buildQuickAccessDrawer(BuildContext context) {
+    Widget head(String t) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 6),
+          child: Text(t, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppTheme.primary, letterSpacing: 0.4)),
+        );
+    Widget item(IconData icon, Color color, String title, VoidCallback onTap, {String? sub}) => ListTile(
+          leading: IconBadge(icon: icon, color: color, size: 18),
+          title: Text(title),
+          subtitle: sub == null ? null : Text(sub, style: const TextStyle(fontSize: 11.5)),
+          onTap: () {
+            Navigator.pop(context);
+            onTap();
+          },
+        );
+    void go(Widget w) => Navigator.push(context, MaterialPageRoute(builder: (_) => w));
     return Drawer(
-      width: MediaQuery.of(context).size.width * 0.7,
+      width: MediaQuery.of(context).size.width * 0.75,
       child: SafeArea(
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-              child: Text('More',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.primary)),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const IconBadge(icon: Icons.insights_outlined, color: AppTheme.accent, size: 18),
-              title: const Text('Vendor Insights'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const VendorInsightsScreen()));
-              },
-            ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.percent, color: AppTheme.profit, size: 18),
-              title: const Text('Pricing & margins'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductMarginsScreen()));
-              },
-            ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.storefront_outlined, color: AppTheme.primary, size: 18),
-              title: const Text('Web Store'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const WebStoreScreen()));
-              },
-            ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.shopping_bag_outlined, color: Color(0xFFE36A06), size: 18),
-              title: const Text('Online Orders'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const OnlineOrdersScreen()));
-              },
-            ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.bar_chart, color: AppTheme.revenue, size: 18),
-              title: Text(AppStrings.t('reports_trends')),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const FinanceScreen()));
-              },
-            ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.sync_alt, color: AppTheme.profit, size: 18),
-              title: Text(AppStrings.t('data_export_import')),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const DataSyncScreen()));
-              },
-            ),
-            ListTile(
-              leading: IconBadge(
-                icon: Icons.warning_amber_rounded,
-                color: _lowStock.isNotEmpty ? AppTheme.danger : AppTheme.success,
-                size: 18,
+            head('ACCOUNTS'),
+            item(Icons.bar_chart, AppTheme.revenue, AppStrings.t('reports_trends'), () => go(const FinanceScreen()),
+                sub: 'Profit & Loss, low profit, debts, cash flow, balance sheet'),
+            item(Icons.receipt_long_outlined, AppTheme.cost, 'Operating expenses', () => go(const ExpensesScreen())),
+            const Divider(height: 20),
+            head('SETTINGS'),
+            if (UserRole.instance.isAdmin)
+              item(Icons.manage_accounts_outlined, AppTheme.primary, 'Manage users', () => go(const ManageUsersScreen())),
+            item(Icons.sync_alt, AppTheme.profit, AppStrings.t('data_export_import'), () => go(const DataSyncScreen())),
+            item(Icons.lock_reset, AppTheme.primary, 'Change password', () => go(const ChangePasswordScreen())),
+            item(Icons.language, AppTheme.accent, AppStrings.t('language'), _pickLanguage),
+            item(Icons.logout, AppTheme.danger, AppStrings.t('sign_out'), _signOut),
+            const Divider(height: 20),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 16),
+              child: Text(
+                'Moved: Online orders → Sales tab · Pricing, Low stock, Suppliers → Stock tab · '
+                'Vendor insights → Customers tab · Web store → Marketing tab · Promotions → "Send to customers" in Status video & pictures.',
+                style: TextStyle(fontSize: 11.5, color: Colors.black54, height: 1.35),
               ),
-              title: Text(AppStrings.t('low_stock_alerts')),
-              trailing: _lowStock.isNotEmpty
-                  ? Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: AppTheme.danger, borderRadius: BorderRadius.circular(12)),
-                      child: Text('${_lowStock.length}', style: const TextStyle(color: Colors.white, fontSize: 11)),
-                    )
-                  : null,
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const InventoryScreen(initialCategoryFilter: 'Low Stock')),
-                );
-              },
             ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.receipt_long_outlined, color: AppTheme.cost, size: 18),
-              title: const Text('Operating Expenses'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpensesScreen()));
-              },
-            ),
-            ListTile(
-              leading: const IconBadge(icon: Icons.lock_reset, color: AppTheme.primary, size: 18),
-              title: const Text('Change Password'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordScreen()));
-              },
-            ),
-            if (UserRole.instance.isAdmin) ...[
-              ListTile(
-                leading: const IconBadge(icon: Icons.campaign_outlined, color: AppTheme.accent, size: 18),
-                title: const Text('Promotions'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const PromotionsScreen()));
-                },
-              ),
-              ListTile(
-                leading: const IconBadge(icon: Icons.manage_accounts_outlined, color: AppTheme.primary, size: 18),
-                title: const Text('Manage Users'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ManageUsersScreen()));
-                },
-              ),
-            ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Today's to-do cards: only what needs attention, most urgent first.
+  Widget _todo(BuildContext context) {
+    void go(Widget w) => Navigator.push(context, MaterialPageRoute(builder: (_) => w));
+    final p = _patterns;
+    final cards = <Widget>[
+      if (_newOrderCount > 0)
+        _TodoCard(Icons.shopping_bag_outlined, const Color(0xFFE36A06), '$_newOrderCount', 'New online orders',
+            () => go(const OnlineOrdersScreen())),
+      if ((p?.late ?? 0) > 0)
+        _TodoCard(Icons.error_outline, AppTheme.danger, '${p!.late}', 'Customers late to buy',
+            () => go(const VendorInsightsScreen(initialGroup: CustGroup.late))),
+      if (_lowStock.isNotEmpty)
+        _TodoCard(Icons.warning_amber_rounded, AppTheme.danger, '${_lowStock.length}', 'Items low in stock',
+            () => go(const InventoryScreen(initialCategoryFilter: 'Low Stock'))),
+      if ((p?.due ?? 0) > 0)
+        _TodoCard(Icons.event_available_outlined, const Color(0xFFD97706), '${p!.due}', 'Customers due this week',
+            () => go(const VendorInsightsScreen(initialGroup: CustGroup.due))),
+      if (_agingVendors.isNotEmpty)
+        _TodoCard(Icons.hourglass_bottom, const Color(0xFFD97706), '${_agingVendors.length}', 'Dues older than 60 days',
+            () => go(const FinanceScreen(initialTab: 4))),
+      if (_belowTarget > 0)
+        _TodoCard(Icons.percent, const Color(0xFFD97706), '$_belowTarget', 'Prices below target',
+            () => go(const ProductMarginsScreen())),
+      if (_supplierDues > 0.5)
+        _TodoCard(Icons.local_shipping_outlined, Colors.brown, formatCurrency(_supplierDues), 'To pay suppliers',
+            () => go(const SuppliersScreen())),
+    ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('To do', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      LayoutBuilder(builder: (context, box) {
+        final w = (box.maxWidth - 10) / 2;
+        return Wrap(spacing: 10, runSpacing: 10, children: [
+          for (final c in cards) SizedBox(width: w, child: c),
+          if (cards.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 6),
+              child: Text('✓ All clear — nothing waiting.', style: TextStyle(color: Color(0xFF16A34A), fontWeight: FontWeight.w700)),
+            ),
+        ]);
+      }),
+      const SizedBox(height: 16),
+      Row(children: [
+        _QuickBtn(Icons.add_shopping_cart, 'New bill', () => go(const NewSaleScreen())),
+        _QuickBtn(Icons.payments_outlined, 'Receive payment', () => go(const VendorsScreen())),
+        _QuickBtn(Icons.inventory_outlined, 'Add purchase', () => go(const SuppliersScreen())),
+        _QuickBtn(Icons.receipt_long_outlined, 'Add expense', () => go(const ExpensesScreen())),
+        _QuickBtn(Icons.movie_creation_outlined, 'Status video', () => go(const SharePicturesScreen())),
+      ]),
+      const SizedBox(height: 20),
+    ]);
+  }
+}
+
+class _TodoCard extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String value, label;
+  final VoidCallback onTap;
+  const _TodoCard(this.icon, this.color, this.value, this.label, this.onTap);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withOpacity(0.35)),
+          ),
+          child: Row(children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
+              child: Icon(icon, color: color, size: 19),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(value, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: color)),
+                Text(label, maxLines: 2, style: const TextStyle(fontSize: 11.5, color: Colors.black54, height: 1.2)),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  const _QuickBtn(this.icon, this.label, this.onTap);
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(14)),
+              child: Icon(icon, color: Colors.white, size: 22),
+            ),
+            const SizedBox(height: 5),
+            Text(label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, height: 1.15)),
+          ]),
         ),
       ),
     );

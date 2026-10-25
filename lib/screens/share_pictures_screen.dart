@@ -18,6 +18,7 @@ import '../utils/user_role.dart';
 import 'poster_styles.dart';
 import 'reel_screen.dart';
 import 'reel_styles.dart';
+import 'send_to_customers.dart';
 
 /// Ready-made pictures for WhatsApp Status, Instagram and groups:
 /// today's prices (one brand at a time), one product offer, or the
@@ -342,6 +343,13 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
                     ),
                   ),
                 ]),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _sendToCustomers(slugs, coupon),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                  icon: const Icon(Icons.groups_outlined),
+                  label: const Text('Send to customers (late, due, category buyers…)'),
+                ),
                 if (_kind == _Kind.offer) ...[
                   const SizedBox(height: 10),
                   FilledButton.tonalIcon(
@@ -879,13 +887,49 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
 
   Future<void> _share(Map<String, String> slugs, Map<String, dynamic> coupon) async {
     setState(() => _busy = true);
-    final shownPage = _page;
     try {
+      final files = await _makeFiles();
+      await Share.shareXFiles([for (final f in files) XFile(f)], text: _caption(slugs, coupon));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not make the picture: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Picture(s) → chosen customers' WhatsApp chats, one after another.
+  Future<void> _sendToCustomers(Map<String, String> slugs, Map<String, dynamic> coupon) async {
+    setState(() => _busy = true);
+    List<String> files;
+    try {
+      files = await _makeFiles();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not make the picture: $e')));
+        setState(() => _busy = false);
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => SendToCustomersScreen(paths: files, mime: 'image/png', caption: _caption(slugs, coupon))),
+    );
+  }
+
+  /// Draws every page of the current picture to PNG files.
+  Future<List<String>> _makeFiles() async {
+    final shownPage = _page;
+    {
       // Offer with several products: one picture per product, in order.
       final pages = _pages;
       final dir = await getTemporaryDirectory();
       final stamp = DateTime.now().millisecondsSinceEpoch;
-      final files = <XFile>[];
+      final files = <String>[];
       for (var i = 0; i < pages; i++) {
         if (pages > 1) {
           setState(() => _page = i);
@@ -899,16 +943,10 @@ class _SharePicturesScreenState extends State<SharePicturesScreen> {
         if (bytes == null) throw StateError('Picture not ready');
         final file = File('${dir.path}/madhura_${_kind.name}_${stamp}_${i + 1}.png');
         await file.writeAsBytes(bytes.buffer.asUint8List());
-        files.add(XFile(file.path));
+        files.add(file.path);
       }
       if (pages > 1 && mounted) setState(() => _page = shownPage);
-      await Share.shareXFiles(files, text: _caption(slugs, coupon));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not make the picture: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      return files;
     }
   }
 

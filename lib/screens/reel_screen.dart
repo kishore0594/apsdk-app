@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../utils/app_theme.dart';
 import 'reel_styles.dart';
+import 'send_to_customers.dart';
 
 /// Makes one Status / Reels video (MP4, 1080 × 1920): 3 seconds per
 /// product, each in its own style and background, optional own photos,
@@ -338,6 +339,19 @@ class _ReelScreenState extends State<ReelScreen> with SingleTickerProviderStateM
                 ),
               ),
             ]),
+          if (_video != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => SendToCustomersScreen(paths: [_video!], mime: 'video/mp4', caption: widget.caption)),
+              ),
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+              icon: const Icon(Icons.groups_outlined),
+              label: const Text('Send to customers (late, due, category buyers…)'),
+            ),
+          ],
           const SizedBox(height: 6),
           Text(
             'One MP4 file, ready for WhatsApp Status, Instagram Reels and Facebook. In WhatsApp, pick "My status"; '

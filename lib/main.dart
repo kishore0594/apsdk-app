@@ -18,7 +18,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/sales_screen.dart';
 import 'screens/inventory_screen.dart';
 import 'screens/vendors_screen.dart';
-import 'screens/suppliers_screen.dart';
+import 'screens/marketing_screen.dart';
 import 'screens/login_screen.dart';
 
 Future<void> main() async {
@@ -263,7 +263,7 @@ class _RootNavState extends State<RootNav> {
     SalesScreen(),
     InventoryScreen(),
     VendorsScreen(),
-    SuppliersScreen(),
+    MarketingScreen(),
   ];
 
   @override
@@ -284,8 +284,8 @@ class _RootNavState extends State<RootNav> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: [
           NavigationDestination(
-              icon: const Icon(Icons.dashboard_outlined),
-              selectedIcon: const Icon(Icons.dashboard),
+              icon: const Icon(Icons.today_outlined),
+              selectedIcon: const Icon(Icons.today),
               label: AppStrings.t('nav_home')),
           NavigationDestination(
               icon: const Icon(Icons.point_of_sale_outlined),
@@ -300,9 +300,9 @@ class _RootNavState extends State<RootNav> {
               selectedIcon: const Icon(Icons.people),
               label: AppStrings.t('nav_credit')),
           NavigationDestination(
-              icon: const Icon(Icons.local_shipping_outlined),
-              selectedIcon: const Icon(Icons.local_shipping),
-              label: AppStrings.t('nav_suppliers')),
+              icon: const Icon(Icons.campaign_outlined),
+              selectedIcon: const Icon(Icons.campaign),
+              label: AppStrings.t('nav_marketing')),
         ],
       ),
     );

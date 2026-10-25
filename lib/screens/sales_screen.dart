@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'hub_bar.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:convert';
 import '../db/db_helper.dart';
@@ -325,6 +326,7 @@ class _SalesScreenState extends State<SalesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(AppStrings.t('sales_title')),
+        bottom: HubBar(salesLinks()),
       ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
         stream: _salesStream.get(_day?.toIso8601String().substring(0, 10) ?? 'all',

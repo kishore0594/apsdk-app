@@ -4,9 +4,14 @@ import '../utils/formatters.dart';
 import '../utils/app_theme.dart';
 import '../utils/app_strings.dart';
 import 'vendors_screen.dart';
+import 'buying_pattern.dart';
+import '../services/customer_pattern.dart';
 
 class VendorInsightsScreen extends StatefulWidget {
-  const VendorInsightsScreen({super.key});
+  /// Open straight on the Buying pattern view (optionally one group).
+  final bool startWithPattern;
+  final CustGroup? initialGroup;
+  const VendorInsightsScreen({super.key, this.startWithPattern = false, this.initialGroup});
 
   @override
   State<VendorInsightsScreen> createState() => _VendorInsightsScreenState();
@@ -16,7 +21,7 @@ enum _View { location, frequency, outstanding, pending }
 
 class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
   final _db = DBHelper.instance;
-  _View _view = _View.location;
+  late _View _view = widget.startWithPattern || widget.initialGroup != null ? _View.frequency : _View.location;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _vendors = [];
@@ -101,8 +106,8 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
               _helpItem(
                 Icons.repeat,
                 AppTheme.accent,
-                'Frequency',
-                'Sorted by number of purchases, most frequent first — counts confirmed sales only, cancelled ones don\'t count. Shows their last purchase date too, so you can spot regulars who\'ve gone quiet.',
+                'Buying pattern',
+                'How often each customer buys, when they are due next, who is late, dropping or lost, what they usually buy, how they pay and what they earn you. Groups are in priority order — Late first. Pick a category to see only its buyers. Tap a customer for the full pattern and WhatsApp reminders.',
               ),
               _helpItem(
                 Icons.account_balance_wallet_outlined,
@@ -194,8 +199,8 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: _ViewChip(
-                              label: AppStrings.t('frequency'),
-                              icon: Icons.repeat,
+                              label: 'Buying pattern',
+                              icon: Icons.insights_outlined,
                               selected: _view == _View.frequency,
                               onTap: () => setState(() => _view = _View.frequency),
                             ),
@@ -236,7 +241,7 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
                       const SizedBox(height: 20),
                       switch (_view) {
                         _View.location => _byLocation(),
-                        _View.frequency => _byFrequency(),
+                        _View.frequency => BuyingPatternView(search: _searchQuery, initialGroup: widget.initialGroup),
                         _View.outstanding => _byOutstanding(),
                         _View.pending => _longPending(),
                       },
@@ -289,20 +294,6 @@ class _VendorInsightsScreenState extends State<VendorInsightsScreen> {
           ),
         );
       }).toList(),
-    );
-  }
-
-  // ---------------- BY PURCHASE FREQUENCY ----------------
-
-  Widget _byFrequency() {
-    final vendors = _filteredVendors;
-    if (vendors.isEmpty) return _emptyMessage(AppStrings.t('no_vendors_yet'));
-    final sorted = [...vendors]
-      ..sort((a, b) => (b['purchase_count'] as int).compareTo(a['purchase_count'] as int));
-
-    return AppCard(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(children: sorted.map((v) => _vendorRow(v, showFrequency: true)).toList()),
     );
   }
 

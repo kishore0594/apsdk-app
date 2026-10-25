@@ -12,6 +12,7 @@ import '../utils/user_role.dart';
 import 'expenses_screen.dart';
 import 'finance_explain.dart';
 import 'finance_settings_screen.dart';
+import 'margin_table.dart';
 import 'product_margins_screen.dart';
 import 'reports_screen.dart';
 
@@ -20,7 +21,9 @@ import 'reports_screen.dart';
 /// month, a quarter or a financial year. Every KPI opens its trend and
 /// the items / categories / expenses / customers behind it, worst first.
 class FinanceScreen extends StatefulWidget {
-  const FinanceScreen({super.key});
+  /// 0 Overview · 1 Profit & Loss · 2 Low profit · 3 Cash flow · 4 Debts · 5 Balance sheet
+  final int initialTab;
+  const FinanceScreen({super.key, this.initialTab = 0});
 
   @override
   State<FinanceScreen> createState() => _FinanceScreenState();
@@ -94,6 +97,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
     final s = _svc;
     return DefaultTabController(
       length: 6,
+      initialIndex: widget.initialTab.clamp(0, 5).toInt(),
       child: Scaffold(
         backgroundColor: AppTheme.scaffold,
         appBar: AppBar(
@@ -121,17 +125,33 @@ class _FinanceScreenState extends State<FinanceScreen> {
             if (UserRole.instance.isAdmin)
               IconButton(tooltip: 'Targets & fixed costs', icon: const Icon(Icons.tune), onPressed: _openSettings),
           ],
-          bottom: const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(text: 'Overview'),
-              Tab(text: 'Profit & Loss'),
-              Tab(text: 'Low-profit culprits'),
-              Tab(text: 'Cash flow'),
-              Tab(text: 'Debts'),
-              Tab(text: 'Balance sheet'),
-            ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(54),
+            child: Container(
+              color: AppTheme.primary,
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+              child: TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                dividerColor: Colors.transparent,
+                labelColor: AppTheme.primary,
+                unselectedLabelColor: Colors.white,
+                labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicator: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(22)),
+                labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+                splashBorderRadius: BorderRadius.circular(22),
+                tabs: const [
+                  _TabChip(Icons.dashboard_outlined, 'Overview'),
+                  _TabChip(Icons.receipt_long_outlined, 'Profit & Loss'),
+                  _TabChip(Icons.trending_down, 'Low profit'),
+                  _TabChip(Icons.account_balance_wallet_outlined, 'Cash flow'),
+                  _TabChip(Icons.people_alt_outlined, 'Debts'),
+                  _TabChip(Icons.account_balance_outlined, 'Balance sheet'),
+                ],
+              ),
+            ),
           ),
         ),
         body: _error != null
@@ -160,8 +180,8 @@ class _FinanceScreenState extends State<FinanceScreen> {
                         child: TabBarView(children: [
                           _Overview(svc: s, period: _period),
                           _ProfitLoss(svc: s, period: _period),
-                          ListView(padding: const EdgeInsets.fromLTRB(12, 8, 12, 32), children: [
-                            CulpritList(svc: s, kpi: Kpi.netProfit, period: _period, limit: 60),
+                          ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 32), children: [
+                            MarginTable(svc: s, period: _period),
                           ]),
                           _CashFlow(svc: s, period: _period, onSettings: _openSettings),
                           _Debts(svc: s, period: _period, onChanged: () => _load(quiet: true)),
@@ -170,6 +190,29 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       ),
                     ),
                   ]),
+      ),
+    );
+  }
+}
+
+/// A tab with an icon and a label; white on green, green on the white pill
+/// when selected.
+class _TabChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _TabChip(this.icon, this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    return Tab(
+      height: 40,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 6),
+          Text(label),
+        ]),
       ),
     );
   }
@@ -561,7 +604,10 @@ class _KpiDetailScreenState extends State<KpiDetailScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            CulpritList(svc: svc, kpi: k, period: _period),
+            if (k == Kpi.netProfit || k == Kpi.grossMargin || k == Kpi.breakEven)
+              MarginTable(svc: svc, period: _period)
+            else
+              CulpritList(svc: svc, kpi: k, period: _period),
           ]),
         ),
       ]),
