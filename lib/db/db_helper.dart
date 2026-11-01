@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/partners.dart';
+import '../services/pricing.dart';
 
 /// Firestore-backed data layer for Madhura Agro Traders. Replaces the old
 /// on-device SQLite database so both phones read and write the same live,
@@ -1098,6 +1100,10 @@ class DBHelper {
     // Courier / delivery charge for web orders: part of what the customer
     // pays (and owes, on credit), but not of any product's price.
     double deliveryCharge = 0,
+    // Partner (friend) who brought this customer. Left empty, the
+    // customer's own partner link is used while it's inside 90 days.
+    String? partnerId,
+    String? partnerName,
   }) async {
     final subtotal = items.fold<double>(
         0, (sum, item) => sum + (item['quantity'] as num) * (item['unit_price'] as num));
@@ -1129,6 +1135,36 @@ class DBHelper {
       vendorCurrentBalance = (vendorData['balance'] as num?)?.toDouble() ?? 0;
     }
 
+    var pId = partnerId;
+    var pName = partnerName;
+    if ((pId == null || pId.isEmpty) && Partners.linkActive(vendorData, at: DateTime.tryParse(now))) {
+      pId = vendorData!['partner_id'] as String?;
+      pName = vendorData['partner_name'] as String?;
+    }
+    final partnerRules = (pId != null && pId.isNotEmpty) ? await PriceRules.load() : null;
+    // Bill discount shared over the items, so commission is on what was paid.
+    final payFactor = subtotal > 0 ? ((subtotal - discount) / subtotal).clamp(0.0, 1.0).toDouble() : 1.0;
+    double partnerTotal = 0;
+    final itemCommission = <double>[];
+    for (final item in items) {
+      final pid = item['product_id'] as String?;
+      final cat = (pid != null && productData.containsKey(pid)) ? (productData[pid]!['category'] as String? ?? '') : '';
+      final qty = (item['quantity'] as num).toDouble();
+      final line = qty * (item['unit_price'] as num).toDouble() * payFactor;
+      final unit = (pid != null && productData.containsKey(pid)) ? (productData[pid]!['unit'] ?? '').toString() : '';
+      final byKg = RegExp(r'^\s*(kg|kgs|kilo)', caseSensitive: false).hasMatch(unit);
+      final c = partnerRules == null
+          ? 0.0
+          : (partnerRules.lineCommission(cat, qty, line,
+                      byKg: byKg,
+                      productPct: (pid != null ? productData[pid]?['partner_pct'] as num? : null)?.toDouble()) *
+                  100)
+              .roundToDouble() /
+              100;
+      itemCommission.add(c);
+      partnerTotal += c;
+    }
+
     // ---- writes ----
     final batch = _fs.batch();
     batch.set(saleRef, {
@@ -1144,9 +1180,14 @@ class DBHelper {
       'notes': notes,
       'status': 'confirmed',
       'due_date': dueDate,
+      if (partnerRules != null) 'partner_id': pId,
+      if (partnerRules != null) 'partner_name': pName,
+      if (partnerRules != null) 'partner_commission': (partnerTotal * 100).roundToDouble() / 100,
     });
 
+    var itemIndex = 0;
     for (final item in items) {
+      final commission = itemCommission[itemIndex++];
       final qty = (item['quantity'] as num).toDouble();
       final price = (item['unit_price'] as num).toDouble();
       final pid = item['product_id'] as String?;
@@ -1175,6 +1216,7 @@ class DBHelper {
         'category': category,
         'subcategory': subcategory,
         'status': 'confirmed',
+        if (partnerRules != null) 'partner_commission': commission,
       });
 
       if (pid != null && productRefs.containsKey(pid)) {

@@ -4,6 +4,7 @@ import '../utils/app_theme.dart';
 import 'finance_screen.dart';
 import 'inventory_screen.dart';
 import 'online_orders_screen.dart';
+import 'partners_screen.dart';
 import 'product_margins_screen.dart';
 import 'suppliers_screen.dart';
 import 'todays_collections_screen.dart';
@@ -106,6 +107,7 @@ List<HubLink> stockLinks() => [
     ];
 
 List<HubLink> customerLinks() => [
+      HubLink(Icons.handshake_outlined, 'Partners', () => const PartnersScreen()),
       HubLink(Icons.insights_outlined, 'Buying pattern', () => const VendorInsightsScreen(startWithPattern: true)),
       HubLink(Icons.hourglass_bottom, 'Debts by age', () => const FinanceScreen(initialTab: 4)),
       HubLink(Icons.place_outlined, 'Insights', () => const VendorInsightsScreen()),

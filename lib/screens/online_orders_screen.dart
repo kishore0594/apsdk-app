@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:url_launcher/url_launcher.dart';
 import '../db/db_helper.dart';
+import '../services/partners.dart';
 import '../services/web_store_service.dart';
 import '../utils/app_theme.dart';
 import '../utils/formatters.dart';
@@ -226,6 +227,7 @@ class _OrderSheet extends StatefulWidget {
 class _OrderSheetState extends State<_OrderSheet> {
   final _svc = WebStoreService.instance;
   late Map<String, dynamic> _o = widget.order;
+  Future<Map<String, dynamic>?>? _partnerFuture;
   bool _busy = false;
   // Earlier orders from this phone (checked when a first-order coupon is used).
   List<String>? _earlier;
@@ -572,6 +574,24 @@ class _OrderSheetState extends State<_OrderSheet> {
           } catch (_) {/* place list is a convenience only */}
         }
       }
+      // Partner link on the order: a NEW customer is linked to the partner
+      // for 90 days; an existing customer earns no commission.
+      String? partnerId, partnerName;
+      var partnerMsg = '';
+      final refCode = (_o['ref'] ?? '').toString();
+      if (refCode.isNotEmpty) {
+        final partner = await Partners.instance.findByCode(refCode);
+        if (partner != null) {
+          if (matched.isEmpty && result['vendor_id'] == null) {
+            partnerId = partner['id'] as String;
+            partnerName = (partner['name'] ?? '').toString();
+            if (vendorId != null) await Partners.instance.linkCustomer(vendorId, partner);
+            partnerMsg = ' Partner: $partnerName.';
+          } else {
+            partnerMsg = ' Existing customer — no partner commission.';
+          }
+        }
+      }
       final total = useApp ? appTotal : orderTotal;
       final saleId = await DBHelper.instance.createSale(
         items: [
@@ -593,6 +613,8 @@ class _OrderSheetState extends State<_OrderSheet> {
         paidAmount: credit ? 0 : total + WebStoreService.orderDelivery(_o) - WebStoreService.orderDiscount(_o),
         notes: 'Web order ${_o['orderNo']}',
         deliveryCharge: WebStoreService.orderDelivery(_o),
+        partnerId: partnerId,
+        partnerName: partnerName,
       );
       await _svc.linkSale(_id, saleId, confirm: _status == 'requested');
       if (mounted) {
@@ -602,7 +624,7 @@ class _OrderSheetState extends State<_OrderSheet> {
               if (_status == 'requested') 'status': 'confirmed',
             });
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Sale recorded — stock and reports are updated.')));
+            SnackBar(content: Text('Sale recorded — stock and reports are updated.$partnerMsg')));
       }
     } catch (e) {
       if (mounted) {
@@ -649,6 +671,14 @@ class _OrderSheetState extends State<_OrderSheet> {
           ].join(' · ')),
           if ((_o['source'] ?? '').toString().isNotEmpty)
             _info(Icons.campaign_outlined, 'From ${const {'status': 'WhatsApp Status', 'qr': 'QR code (poster / pack)', 'wa': 'WhatsApp link', 'gbp': 'Google Business Profile', 'insta': 'Instagram', 'fb': 'Facebook'}[(_o['source']).toString()] ?? _o['source']}'),
+          if ((_o['ref'] ?? '').toString().isNotEmpty)
+            FutureBuilder<Map<String, dynamic>?>(
+              future: _partnerFuture ??= Partners.instance.findByCode(_o['ref'].toString()),
+              builder: (_, snap) => _info(Icons.handshake_outlined,
+                  'Partner link: ${snap.data == null ? _o['ref'] : '${snap.data!['name']} (${_o['ref']})'} — only you see this'),
+            ),
+          if ((_o['refBy'] ?? '').toString().isNotEmpty)
+            _info(Icons.record_voice_over_outlined, 'Customer says told by: ${_o['refBy']}  (link in Customers → Partners)'),
           if (_o['proof'] == true) _proofSection(canEdit),
           if ((_o['weightKg'] as num?) != null && _o['fulfilment'] != 'pickup')
             _info(Icons.scale_outlined, 'Parcel weight: ${(_o['weightKg'] as num).toString()} kg'),

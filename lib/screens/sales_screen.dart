@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/partners.dart';
 import 'hub_bar.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'dart:convert';
@@ -511,9 +513,123 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
 
   Pricing? _pricing;
 
+  // Customer place filter: the chosen place is remembered for the next bill.
+  String _place = '';
+  static const _placeKey = 'bill_place';
+
+  static String _placeOf(Map<String, dynamic> v) => (v['address'] ?? '').toString().trim();
+
+  /// Places of saved customers, most customers first.
+  List<String> get _places {
+    final count = <String, int>{};
+    final label = <String, String>{};
+    for (final v in _vendors) {
+      final p = _placeOf(v);
+      if (p.isEmpty) continue;
+      final k = p.toLowerCase();
+      count[k] = (count[k] ?? 0) + 1;
+      label.putIfAbsent(k, () => p);
+    }
+    final keys = count.keys.toList()..sort((a, b) => count[b]!.compareTo(count[a]!));
+    return keys.take(15).map((k) => label[k]!).toList();
+  }
+
+  Future<void> _setPlace(String p) async {
+    setState(() => _place = p);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_placeKey, p);
+    } catch (_) {}
+  }
+
+  Map<String, dynamic>? get _vendor {
+    final m = _vendors.where((v) => v['id'] == _vendorId);
+    return m.isEmpty ? null : m.first;
+  }
+
+  Future<void> _pickCustomer() async {
+    var q = '';
+    var place = _place;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        bool inPlace(Map<String, dynamic> v) => place.isEmpty || _placeOf(v).toLowerCase() == place.toLowerCase();
+        bool hit(Map<String, dynamic> v) =>
+            q.isEmpty ||
+            (v['name'] ?? '').toString().toLowerCase().contains(q) ||
+            (v['phone'] ?? '').toString().contains(q);
+        var list = _vendors.where((v) => inPlace(v) && hit(v)).toList();
+        final widened = list.isEmpty && q.isNotEmpty && place.isNotEmpty;
+        if (widened) list = _vendors.where(hit).toList();
+        return Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.75,
+            child: Column(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                child: TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search), hintText: 'Customer name or phone', border: OutlineInputBorder(), isDense: true),
+                  onChanged: (v) => setS(() => q = v.trim().toLowerCase()),
+                ),
+              ),
+              SizedBox(
+                height: 44,
+                child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
+                  for (final p in ['', ..._places])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(p.isEmpty ? 'All places' : p),
+                        selected: place.toLowerCase() == p.toLowerCase(),
+                        onSelected: (_) {
+                          setS(() => place = p);
+                          _setPlace(p);
+                        },
+                      ),
+                    ),
+                ]),
+              ),
+              if (widened)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('Not in this place — showing all places', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                ),
+              Expanded(
+                child: ListView(children: [
+                  for (final v in list.take(200))
+                    ListTile(
+                      dense: true,
+                      title: Text((v['name'] ?? '').toString()),
+                      subtitle: Text([
+                        _placeOf(v),
+                        (v['phone'] ?? '').toString(),
+                        if (Partners.linkActive(v)) '🤝 ${v['partner_name']}',
+                      ].where((x) => x.isNotEmpty).join(' · ')),
+                      selected: v['id'] == _vendorId,
+                      onTap: () => Navigator.pop(ctx, v['id'] as String),
+                    ),
+                  if (list.isEmpty) const Padding(padding: EdgeInsets.all(20), child: Center(child: Text('No customer found'))),
+                ]),
+              ),
+            ]),
+          ),
+        );
+      }),
+    );
+    if (picked != null && mounted) setState(() => _vendorId = picked);
+  }
+
   @override
   void initState() {
     super.initState();
+    SharedPreferences.getInstance().then((prefs) {
+      final p = prefs.getString(_placeKey) ?? '';
+      if (mounted && p.isNotEmpty) setState(() => _place = p);
+    }).catchError((_) {});
     _loadData();
     Pricing.load().then((v) {
       if (mounted) setState(() => _pricing = v);
@@ -1002,18 +1118,32 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _vendorId,
-                          decoration: InputDecoration(
-                            labelText: _paymentType == 'CASH'
-                                ? 'Customer (optional)'
-                                : 'Vendor (credit customer)',
+                        child: InkWell(
+                          onTap: _pickCustomer,
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: _paymentType == 'CASH'
+                                  ? 'Customer (optional)'
+                                  : 'Vendor (credit customer)',
+                              helperText: _place.isEmpty ? null : 'Place: $_place',
+                              suffixIcon: _vendorId == null
+                                  ? const Icon(Icons.search)
+                                  : IconButton(
+                                      icon: const Icon(Icons.clear, size: 18),
+                                      onPressed: () => setState(() => _vendorId = null),
+                                    ),
+                            ),
+                            child: Text(
+                              _vendor == null
+                                  ? 'Tap to choose'
+                                  : [
+                                      (_vendor!['name'] ?? '').toString(),
+                                      _placeOf(_vendor!),
+                                    ].where((x) => x.isNotEmpty).join(' · '),
+                              overflow: TextOverflow.ellipsis,
+                              style: _vendor == null ? const TextStyle(color: Colors.black45) : null,
+                            ),
                           ),
-                          items: _vendors
-                              .map((v) =>
-                                  DropdownMenuItem(value: v['id'] as String, child: Text(v['name'] as String)))
-                              .toList(),
-                          onChanged: (v) => setState(() => _vendorId = v),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1024,6 +1154,12 @@ class _NewSaleScreenState extends State<NewSaleScreen> {
                       ),
                     ],
                   ),
+                  if (_vendor != null && Partners.linkActive(_vendor))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('🤝 ${_vendor!['partner_name']} (partner) earns commission on this bill',
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF2E7D32))),
+                    ),
                   if (_paymentType != 'CASH') ...[
                     const SizedBox(height: 8),
                     ListTile(

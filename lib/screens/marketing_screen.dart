@@ -3,6 +3,7 @@ import '../utils/app_theme.dart';
 import 'combos_screen.dart';
 import 'feedback_screen.dart';
 import 'offer_alerts_screen.dart';
+import 'partners_screen.dart';
 import 'recipes_screen.dart';
 import 'search_words_screen.dart';
 import 'share_pictures_screen.dart';
@@ -23,6 +24,14 @@ class MarketingScreen extends StatelessWidget {
           _M(Icons.movie_creation_outlined, 'Status video & pictures',
               'WhatsApp Status, Reels, Instagram — and send them to chosen customers (late, due, category buyers)',
               const Color(0xFFE36A06), () => const SharePicturesScreen()),
+        ]
+      ),
+      (
+        'Partners',
+        [
+          _M(Icons.handshake_outlined, 'Partners (friends who sell for you)',
+              'Their own link & QR · commission earned, waiting, paid · WhatsApp statement',
+              const Color(0xFF2E7D32), () => const PartnersScreen()),
         ]
       ),
       (
