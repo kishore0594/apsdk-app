@@ -1153,14 +1153,14 @@ class DBHelper {
       final line = qty * (item['unit_price'] as num).toDouble() * payFactor;
       final unit = (pid != null && productData.containsKey(pid)) ? (productData[pid]!['unit'] ?? '').toString() : '';
       final byKg = RegExp(r'^\s*(kg|kgs|kilo)', caseSensitive: false).hasMatch(unit);
-      final c = partnerRules == null
-          ? 0.0
-          : (partnerRules.lineCommission(cat, qty, line,
-                      byKg: byKg,
-                      productPct: (pid != null ? productData[pid]?['partner_pct'] as num? : null)?.toDouble()) *
-                  100)
-              .roundToDouble() /
-              100;
+      final Map<String, dynamic>? pData = pid == null ? null : productData[pid];
+      final Object? ownRaw = pData == null ? null : pData['partner_pct'];
+      final double? ownPct = ownRaw is num ? ownRaw.toDouble() : null;
+      double c = 0.0;
+      if (partnerRules != null) {
+        final raw = partnerRules.lineCommission(cat, qty, line, byKg: byKg, productPct: ownPct);
+        c = (raw * 100).roundToDouble() / 100;
+      }
       itemCommission.add(c);
       partnerTotal += c;
     }
