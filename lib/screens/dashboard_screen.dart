@@ -837,6 +837,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
         ]);
       }),
+      const SizedBox(height: 10),
+      const _WaTapsCard(),
       const SizedBox(height: 16),
       Row(children: [
         _QuickBtn(Icons.add_shopping_cart, 'New bill', () => go(const NewSaleScreen())),
@@ -847,6 +849,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ]),
       const SizedBox(height: 20),
     ]);
+  }
+}
+
+/// Taps on the website's "Order on WhatsApp" buttons (counted per day by
+/// the website in wa_taps/{YYYY-MM-DD}): shows whether visitors try to order.
+class _WaTapsCard extends StatelessWidget {
+  const _WaTapsCard();
+
+  static String _day(DateTime d) {
+    final x = d.toUtc().add(const Duration(hours: 5, minutes: 30));
+    return '${x.year.toString().padLeft(4, '0')}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = _day(now);
+    final from = _day(now.subtract(const Duration(days: 6)));
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('wa_taps')
+          .where(FieldPath.documentId, isGreaterThanOrEqualTo: from)
+          .snapshots(),
+      builder: (context, snap) {
+        int n(Map<String, dynamic> d, String k) => (d[k] as num?)?.toInt() ?? 0;
+        var todayN = 0, week = 0, cart = 0, product = 0, page = 0;
+        for (final doc in snap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]) {
+          final d = doc.data();
+          week += n(d, 'n');
+          cart += n(d, 'cart');
+          product += n(d, 'product');
+          page += n(d, 'page');
+          if (doc.id == today) todayN = n(d, 'n');
+        }
+        return Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => showDialog<void>(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: const Text('WhatsApp taps from the website'),
+                content: Text('How many times visitors tapped an "Order on WhatsApp" button on madhuraagro.in.\n\n'
+                    'Last 7 days: $week\n• From the cart (quick order): $cart\n• From product, recipe, guide and town pages: $product\n'
+                    '• Other WhatsApp buttons: $page\n\nMany taps but few chats → check WhatsApp replies. Few taps → more visitors needed.'),
+                actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+              ),
+            ),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF16A34A).withOpacity(0.35)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.chat_outlined, color: Color(0xFF16A34A), size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    snap.hasError
+                        ? 'WhatsApp taps from website: not available yet'
+                        : 'WhatsApp taps from website: today $todayN · last 7 days $week',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const Icon(Icons.chevron_right, size: 18, color: Colors.black38),
+              ]),
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
