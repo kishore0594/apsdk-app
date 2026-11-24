@@ -74,8 +74,12 @@ class _RulesCard extends StatelessWidget {
   const _RulesCard();
 
   @override
-  Widget build(BuildContext context) {
-    final r = PriceRules.cached;
+  Widget build(BuildContext context) => FutureBuilder<PriceRules>(
+        future: PriceRules.load(), // owner's current rates, not the defaults
+        builder: (context, snap) => _card(snap.data ?? PriceRules.cached),
+      );
+
+  Widget _card(PriceRules r) {
     String n(double v) => v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
     return Card(
       color: const Color(0xFFF1F7EE),
@@ -428,6 +432,10 @@ class _PartnerDetailScreenState extends State<PartnerDetailScreen> {
       }),
     );
     if (picked == null) return;
+    if (Partners.samePhone(picked['phone'], _p['phone'])) {
+      _snack('This is ${_p['name']}\'s own number — partners don\'t earn on their own purchases.');
+      return;
+    }
     final other = (picked['partner_id'] ?? '').toString();
     if (other.isNotEmpty && other != _p['id'] && Partners.linkActive(picked)) {
       if (!mounted) return;

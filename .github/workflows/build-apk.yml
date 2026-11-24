@@ -18,6 +18,9 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          # Fixed version: a new Flutter release can't break the build by
+          # surprise. Change this number only when upgrading on purpose.
+          flutter-version: '3.47.9'
 
       # This repo only ships lib/ and pubspec.yaml (see README). If the
       # android/ folder isn't in the repo yet — or exists but is missing
@@ -694,6 +697,19 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      # Quick code check (about 1 minute): lists EVERY error at once, so a
+      # failed build doesn't need several rounds to find them. It never
+      # stops the build by itself — the real build below decides.
+      - name: Quick code check (all errors in one list)
+        continue-on-error: true
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings | grep -E "error •|issues? found|No issues" || true
+
+      # Money maths (price rule, commission, profit) checked against the
+      # owner's own examples. Shown as a warning if a result changes.
+      - name: Check price and commission maths
+        continue-on-error: true
+        run: flutter test test/price_rules_test.dart
 
       # Some plugins (file_picker's dependency chain, in this project)
       # need a newer Android compileSdk than Flutter's template sets by

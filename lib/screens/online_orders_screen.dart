@@ -581,7 +581,11 @@ class _OrderSheetState extends State<_OrderSheet> {
       final refCode = (_o['ref'] ?? '').toString();
       if (refCode.isNotEmpty) {
         final partner = await Partners.instance.findByCode(refCode);
-        if (partner != null) {
+        if (partner != null && partner['active'] == false) {
+          partnerMsg = ' Partner ${partner['name']} is paused — no commission.';
+        } else if (partner != null && Partners.samePhone(partner['phone'], phone)) {
+          partnerMsg = ' Partner bought for themselves — no commission.';
+        } else if (partner != null) {
           if (matched.isEmpty && result['vendor_id'] == null) {
             partnerId = partner['id'] as String;
             partnerName = (partner['name'] ?? '').toString();

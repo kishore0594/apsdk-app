@@ -111,6 +111,17 @@ class Partners {
         'partner_since': FieldValue.delete(),
       }));
 
+  /// Same 10-digit phone number (ignores +91, spaces).
+  static bool samePhone(Object? a, Object? b) {
+    String d(Object? x) {
+      final s = (x ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
+      return s.length > 10 ? s.substring(s.length - 10) : s;
+    }
+
+    final x = d(a), y = d(b);
+    return x.length == 10 && x == y;
+  }
+
   /// Is this customer still inside their partner's 90 days?
   static bool linkActive(Map<String, dynamic>? vendor, {DateTime? at}) {
     if (vendor == null) return false;
@@ -139,16 +150,17 @@ class Partners {
     final payments = r[2].docs.map(_withId).toList();
     // Vendors of these sales (also ones since unlinked) — for "has paid?".
     final balances = <String, double>{for (final v in customers) v['id'] as String: _n(v['balance'])};
-    for (final s in sales) {
-      final vid = (s['vendor_id'] ?? '').toString();
-      if (vid.isEmpty || balances.containsKey(vid)) continue;
+    final missing = {
+      for (final s in sales) (s['vendor_id'] ?? '').toString(),
+    }..removeWhere((vid) => vid.isEmpty || balances.containsKey(vid));
+    await Future.wait(missing.map((vid) async {
       try {
         final d = await _fs.collection('vendors').doc(vid).get();
-        balances[vid] = _n((d.data() as Map<String, dynamic>?)?['balance']);
+        balances[vid] = _n(d.data()?['balance']);
       } catch (_) {
         balances[vid] = 0;
       }
-    }
+    }));
     final entries = <PartnerEntry>[];
     for (final s in sales) {
       final amount = _n(s['partner_commission']);

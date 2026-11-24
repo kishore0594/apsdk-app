@@ -27,7 +27,12 @@ const reelStyleNames = {
 /// "Mix for me" order: lively styles first, calm ones between.
 const reelMixOrder = [ReelStyle.farm, ReelStyle.slam, ReelStyle.spotlight, ReelStyle.story, ReelStyle.polaroid];
 
-enum ReelBg { auto, field, millet, harvest, shop, table, koozh, kali, pongal, own }
+enum ReelBg { auto, field, millet, harvest, shop, table, koozh, kali, pongal, sunrise, grain, leaf, marigold, kolam, deepam, jute, brass, own }
+
+/// The new photo backgrounds (November 2026) — used by "Fresh look".
+const reelFreshBgs = [
+  ReelBg.sunrise, ReelBg.grain, ReelBg.leaf, ReelBg.marigold, ReelBg.kolam, ReelBg.deepam, ReelBg.jute, ReelBg.brass,
+];
 
 const reelBgNames = {
   ReelBg.auto: 'Best for style',
@@ -39,6 +44,14 @@ const reelBgNames = {
   ReelBg.koozh: 'Koozh pot',
   ReelBg.kali: 'Ragi kali',
   ReelBg.pongal: 'Pongal',
+  ReelBg.sunrise: 'Sunrise paddy field (new)',
+  ReelBg.grain: 'Millet ears at sunset (new)',
+  ReelBg.leaf: 'Banana leaf (new)',
+  ReelBg.marigold: 'Marigold garland (new)',
+  ReelBg.kolam: 'Kolam (new)',
+  ReelBg.deepam: 'Deepam lamps (new)',
+  ReelBg.jute: 'Jute sacks & grains (new)',
+  ReelBg.brass: 'Brass plate & millets (new)',
   ReelBg.own: 'My photo',
 };
 

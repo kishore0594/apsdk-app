@@ -196,6 +196,19 @@ class _ReelScreenState extends State<ReelScreen> with SingleTickerProviderStateM
     _rebuild();
   }
 
+  /// New look in one tap: keeps each product's style (effects), gives
+  /// every product a different one of the new backgrounds; tap again
+  /// for another set.
+  int _freshTurn = 0;
+  void _fresh() {
+    for (var i = 0; i < _products.length; i++) {
+      _products[i].bg = reelFreshBgs[(i + _freshTurn) % reelFreshBgs.length];
+      _products[i].ownBg = null;
+    }
+    _freshTurn += 3;
+    _rebuild();
+  }
+
   void _sameForAll() {
     if (_products.isEmpty) return;
     final f = _products.first;
@@ -359,10 +372,11 @@ class _ReelScreenState extends State<ReelScreen> with SingleTickerProviderStateM
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.35),
           ),
           const SizedBox(height: 16),
-          Row(children: [
-            const Expanded(
-                child: Text('Style for each product', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15))),
+          const Text('Style for each product', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          Wrap(spacing: 4, children: [
             TextButton(onPressed: _mix, child: const Text('Mix for me')),
+            TextButton.icon(
+                onPressed: _fresh, icon: const Icon(Icons.auto_awesome, size: 16), label: const Text('Fresh look')),
             TextButton(onPressed: _products.length > 1 ? _sameForAll : null, child: const Text('Same for all')),
           ]),
           for (var i = 0; i < _products.length; i++) _productCard(i, _products[i]),

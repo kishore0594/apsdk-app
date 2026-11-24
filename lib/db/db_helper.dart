@@ -1141,6 +1141,17 @@ class DBHelper {
       pId = vendorData!['partner_id'] as String?;
       pName = vendorData['partner_name'] as String?;
     }
+    // Paused partners earn nothing new; a partner's own purchases don't count.
+    if (pId != null && pId.isNotEmpty) {
+      try {
+        final ps = await _fs.collection('partners').doc(pId).get();
+        final pd = ps.data();
+        if (pd != null) {
+          final own = Partners.samePhone(pd['phone'], vendorData?['phone']);
+          if (pd['active'] == false || own) pId = null;
+        }
+      } catch (_) {/* offline with nothing cached: keep the link */}
+    }
     final partnerRules = (pId != null && pId.isNotEmpty) ? await PriceRules.load() : null;
     // Bill discount shared over the items, so commission is on what was paid.
     final payFactor = subtotal > 0 ? ((subtotal - discount) / subtotal).clamp(0.0, 1.0).toDouble() : 1.0;

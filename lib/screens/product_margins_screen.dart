@@ -546,13 +546,36 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
     }
     String cell(List<String> r, int i) => i >= 0 && i < r.length ? r[i].trim() : '';
     String key(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
-    final byName = <String, Map<String, dynamic>>{for (final p in _products) key((p['name'] ?? '').toString()): p};
+    // Same name can be a kg item AND a wholesale bag (e.g. Sorghum (white)):
+    // the file's unit column decides which one gets the price.
+    final byName = <String, List<Map<String, dynamic>>>{};
+    for (final p in _products) {
+      byName.putIfAbsent(key((p['name'] ?? '').toString()), () => []).add(p);
+    }
+    final iUnit = col('unit');
+    Map<String, dynamic>? pick(String name, String unit) {
+      final list = byName[key(name)];
+      if (list == null || list.isEmpty) return null;
+      if (list.length == 1) return list.first;
+      final u = unit.toLowerCase();
+      final wantKg = u.startsWith('kg') || u.contains('kilo');
+      final wantBag = u.contains('bag');
+      for (final p in list) {
+        final perKg = FinanceService.perKgUnit(p);
+        final isBag = (p['unit'] ?? '').toString().toLowerCase().contains('bag') ||
+            (p['category'] ?? '').toString().toLowerCase().contains('wholesale');
+        if (wantKg && perKg) return p;
+        if (wantBag && isBag) return p;
+        if (!wantKg && !wantBag && !perKg && !isBag) return p;
+      }
+      return null; // can't tell which — listed as not matched
+    }
     var found = 0, notFound = 0;
     final unknown = <String>[];
     for (final r in rows.skip(1)) {
       final name = cell(r, iName);
       if (name.isEmpty) continue;
-      final p = byName[key(name)];
+      final p = pick(name, cell(r, iUnit));
       if (p == null) {
         unknown.add(name);
         continue;
@@ -867,7 +890,9 @@ class _Row {
 
   bool get aboveMarket => online && market > 0 && web > market + 0.5;
   bool get shopBelow => cost > 0 && shopBreak.profitPct < shopTarget - 0.5;
-  bool get webBelow => online && cost > 0 && webBreak.profitPct < webTarget - 0.5;
+  /// Priced on purpose to meet the market (commission & profit cut).
+  bool get competitive => plan.commissionCut && (web - plan.price).abs() < 1;
+  bool get webBelow => !competitive && online && cost > 0 && webBreak.profitPct < webTarget - 0.5;
 
   /// Lowest first.
   double get worstGap {
