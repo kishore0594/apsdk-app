@@ -345,21 +345,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (_) {}
     // Products priced below their margin target (shop or online).
     var belowTarget = 0;
-    final pr = _pricing;
-    if (pr != null) {
+    // Same check as the Pricing screen and Reports, so the numbers match.
+    if (_pricing != null) {
+      final rules = PriceRules.cached;
       for (final p in _rawProducts) {
-        final cost = (p['cost_price'] as num?)?.toDouble() ?? 0.0;
-        if (cost <= 0) continue;
-        final cat = FinanceService.tidy(p['category'] as String?);
-        final t = pr.target(cat);
-        final shop = (p['selling_price'] as num?)?.toDouble() ?? 0.0;
-        var below = shop > 0 && Pricing.margin(shop, cost) < t - 0.5 && pr.suggestShop(cost, cat) > shop;
-        if (!below && WebStoreService.isOnline(p)) {
-          final web = WebStoreService.priceOf(p);
-          final perKg = FinanceService.perKgUnit(p);
-          below = web > 0 && pr.onlineMargin(web, cost, perKg: perKg) < t - 0.5 && pr.suggestOnline(cost, cat, perKg: perKg) > web;
-        }
-        if (below) belowTarget++;
+        if (RuleCheck.of(p, rules).below) belowTarget++;
       }
     }
 

@@ -72,18 +72,70 @@ class _RecipesScreenState extends State<RecipesScreen> {
                   const EmptyState(
                     icon: Icons.restaurant_menu,
                     title: 'No recipes yet',
-                    message: 'Start with 15 traditional millet and gram recipes in English and Tamil — you can edit them.',
+                    message: 'Start with 27 traditional millet, rice and gram recipes in English and Tamil — you can edit them.',
                   ),
                   if (_canEdit)
                     FilledButton.icon(
                       onPressed: () async {
                         await _saveRecipes(WebStoreService.starterRecipesFor(products, starterRecipes));
-                        _done('15 recipes added and linked to your products');
+                        _done('${starterRecipes.length} recipes added and linked to your products');
                       },
                       icon: const Icon(Icons.auto_awesome),
-                      label: const Text('Add 15 starter recipes'),
+                      label: Text('Add ${starterRecipes.length} starter recipes'),
                     ),
                 ],
+                // New recipes from app updates: added to the list, never replacing
+                // the shop's own recipes or edits.
+                if (_canEdit && recipes.isNotEmpty)
+                  Builder(builder: (_) {
+                    final have = recipes.map((r) => r['id']).toSet();
+                    final missing = starterRecipes.where((r) => !have.contains(r['id'])).toList();
+                    // Corrected recipes the shop has not edited (first step unchanged).
+                    final fix = recipes.where((r) {
+                      final old = recipeCorrections[r['id']];
+                      final steps = (r['steps'] as List?) ?? const [];
+                      return old != null && steps.isNotEmpty && steps.first == old;
+                    }).map((r) => r['id']).toSet();
+                    if (missing.isEmpty && fix.isEmpty) return const SizedBox.shrink();
+                    if (missing.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: FilledButton.tonalIcon(
+                          onPressed: () async {
+                            final lib = {for (final r in starterRecipes) r['id']: r};
+                            await _saveRecipes([
+                              for (final r in recipes)
+                                fix.contains(r['id'])
+                                    ? {...r, ...(Map<String, dynamic>.from(lib[r['id']]!)..remove('keys')..remove('photo'))}
+                                    : r,
+                            ]);
+                            _done('${fix.length} recipes updated — your photos and product links are kept');
+                          },
+                          icon: const Icon(Icons.auto_fix_high),
+                          label: Text('Update ${fix.length} improved recipes'),
+                        ),
+                      );
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: FilledButton.tonalIcon(
+                        onPressed: () async {
+                          final lib = {for (final r in starterRecipes) r['id']: r};
+                          await _saveRecipes([
+                            for (final r in recipes)
+                              fix.contains(r['id'])
+                                  ? {...r, ...(Map<String, dynamic>.from(lib[r['id']]!)..remove('keys')..remove('photo'))}
+                                  : r,
+                            ...WebStoreService.starterRecipesFor(products, missing),
+                          ]);
+                          _done('${missing.length} new recipes added${fix.isEmpty ? '' : ' and ${fix.length} improved'} — on the website in a few minutes');
+                        },
+                        icon: const Icon(Icons.auto_awesome),
+                        label: Text('Add ${missing.length} new recipes (${missing.take(2).map((r) => r['name']).join(', ')}…)'
+                            '${fix.isEmpty ? '' : ' + update ${fix.length}'}'),
+                      ),
+                    );
+                  }),
                 for (final r in recipes)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),

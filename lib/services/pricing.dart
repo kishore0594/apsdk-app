@@ -291,6 +291,39 @@ class PriceRules {
       );
 }
 
+/// Is a product below the price rules? The ONE check used by every
+/// screen (Pricing, Reports, Today, product editor), so they always agree.
+/// A product priced on purpose to meet the market (commission & profit cut
+/// together) does not count as below.
+class RuleCheck {
+  final bool shopBelow, onlineBelow;
+  final double shopProfitPct, onlineProfitPct;
+  const RuleCheck(this.shopBelow, this.onlineBelow, this.shopProfitPct, this.onlineProfitPct);
+  bool get below => shopBelow || onlineBelow;
+
+  static double _n(Object? v) => v is num ? v.toDouble() : 0.0;
+
+  static RuleCheck of(Map<String, dynamic> p, PriceRules r, {double? onlinePriceOverride}) {
+    final cost = _n(p['cost_price']);
+    if (cost <= 0) return const RuleCheck(false, false, 0, 0);
+    final cat = FinanceService.tidy(p['category'] as String?);
+    final perKg = FinanceService.perKgUnit(p);
+    final shop = _n(p['selling_price']);
+    final shopB = r.shopBreak(shop, cost);
+    final shopBelow = shop > 0 && shopB.profitPct < r.shopProfitFor(cat) - 0.5;
+    final webSet = _n(p['web_price']);
+    final web = onlinePriceOverride ?? (webSet > 0 ? webSet : shop);
+    final online = p['web_visible'] != false && web > 0;
+    if (!online) return RuleCheck(shopBelow, false, shopB.profitPct, 0);
+    final own = (p['partner_pct'] as num?)?.toDouble();
+    final webB = r.onlineBreak(web, cost, cat, perKg, productPct: own);
+    final plan = r.onlinePlan(cost, cat, perKg, market: _n(p['market_price']));
+    final competitive = plan.commissionCut && (web - plan.price).abs() < 1;
+    final onlineBelow = !competitive && webB.profitPct < r.onlineMinFor(cat) - 0.5;
+    return RuleCheck(shopBelow, onlineBelow, shopB.profitPct, webB.profitPct);
+  }
+}
+
 enum PlanKind { rule, noMarket, belowMarket, atMarket, cut, aboveMarket }
 
 /// An online price from the rules, with the partner commission it carries.

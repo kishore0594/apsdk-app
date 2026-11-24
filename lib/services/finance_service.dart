@@ -362,7 +362,8 @@ class FinanceService {
 
   static Future<FinanceService> load() async {
     final db = DBHelper.instance;
-    final results = await Future.wait([db.getFinanceRaw(), db.getFinanceSettings()]);
+    // Price rules loaded too, so Reports uses the same rules as Pricing.
+    final results = await Future.wait<Object>([db.getFinanceRaw(), db.getFinanceSettings(), PriceRules.load()]);
     final raw = results[0] as Map<String, List<Map<String, dynamic>>>;
     final settings = FinanceSettings.fromMap(results[1] as Map<String, dynamic>);
     final svc = FinanceService(raw, settings);
@@ -833,19 +834,10 @@ class FinanceService {
   int belowTargetCount() {
     final cached = _below;
     if (cached != null) return cached;
-    final pr = Pricing(settings);
+    final rules = PriceRules.cached; // same rules as the Pricing screen
     var n = 0;
     for (final p in _products.values) {
-      final cost = _n(p['cost_price']);
-      if (cost <= 0) continue;
-      final t = pr.target(tidy(p['category'] as String?)) - 0.5;
-      final shop = _n(p['selling_price']);
-      final web = _n(p['web_price']) > 0 ? _n(p['web_price']) : shop;
-      final online = p['web_visible'] != false && web > 0;
-      if ((shop > 0 && Pricing.margin(shop, cost) < t) ||
-          (online && pr.onlineMargin(web, cost, perKg: perKgUnit(p)) < t)) {
-        n++;
-      }
+      if (RuleCheck.of(p, rules).below) n++;
     }
     return _below = n;
   }

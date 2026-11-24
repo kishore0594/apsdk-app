@@ -366,10 +366,12 @@ class _ProductFormState extends State<_ProductForm> {
     if (pr == null || cost <= 0) return const SizedBox.shrink();
     final cat = _category.text.trim();
     final price = double.tryParse(_sellingPrice.text) ?? 0;
-    final target = pr.target(cat);
+    // Same price rules as the Pricing screen: net profit after bills share.
+    final rules = PriceRules.cached;
+    final target = rules.shopProfitFor(cat);
     final shop = pr.suggestShop(cost, cat);
     final online = pr.suggestOnline(cost, cat, perKg: RegExp(r'^\s*kg', caseSensitive: false).hasMatch(_unit));
-    final m = Pricing.margin(price, cost);
+    final m = rules.shopBreak(price, cost).profitPct;
     final ok = m >= target - 0.5;
     return Container(
       margin: const EdgeInsets.only(top: 8),
@@ -380,7 +382,7 @@ class _ProductFormState extends State<_ProductForm> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
-          '${cat.isEmpty ? 'Margin target' : '$cat target'} ${target.toStringAsFixed(0)}%'
+          'Shop net profit target ${target.toStringAsFixed(0)}%'
           '${price > 0 ? ' · your price gives ${m.toStringAsFixed(1)}%${ok ? ' ✓' : ' — below target'}' : ''}',
           style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: ok ? Colors.green.shade800 : Colors.orange.shade900),
         ),
@@ -392,7 +394,7 @@ class _ProductFormState extends State<_ProductForm> {
             child: const Text('Use'),
           ),
         ]),
-        Text('Suggested online price ₹${online.toStringAsFixed(0)} (covers packing, fees and risk — set it in Web Store or Pricing)',
+        Text('Suggested online price ₹${online.toStringAsFixed(0)} (covers packing, bills, payment & returns and partner commission — set it in Web Store or Pricing)',
             style: const TextStyle(fontSize: 12, color: Colors.black54)),
       ]),
     );

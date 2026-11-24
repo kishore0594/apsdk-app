@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/web_store_service.dart';
+import '../services/finance_service.dart';
 import '../services/pricing.dart';
 import '../utils/app_theme.dart';
 import '../utils/formatters.dart';
@@ -920,17 +921,18 @@ class _WebStoreScreenState extends State<WebStoreScreen> {
     final cost = (p['cost_price'] as num?)?.toDouble() ?? 0;
     if (cost > 0) {
       try {
-        final pr = await Pricing.load();
+        final rules = await PriceRules.load(); // same rules as the Pricing screen
         final sells = (offerV > 0 && offerV < price) ? offerV : price;
-        final m = pr.onlineMargin(sells, cost, perKg: byWeight);
-        if (m < pr.s.billMinMargin && mounted) {
+        final check = RuleCheck.of({...p, 'web_weight': byWeight, 'web_visible': true}, rules, onlinePriceOverride: sells);
+        final cat = FinanceService.tidy(p['category'] as String?);
+        if (check.onlineBelow && mounted) {
           final go = await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
-              title: const Text('Low online margin'),
-              content: Text('At ₹${sells.toStringAsFixed(0)} the online margin is ${m.toStringAsFixed(1)}% after packing '
-                  '(₹${pr.s.onlinePackCost.round()}), payment fee and risk — below your ${pr.s.billMinMargin.toStringAsFixed(0)}% '
-                  'minimum. Suggested online price: ₹${pr.suggestOnline(cost, (p['category'] ?? '').toString(), perKg: byWeight).toStringAsFixed(0)}.'),
+              title: const Text('Low online profit'),
+              content: Text('At ₹${sells.toStringAsFixed(0)} the online net profit is ${check.onlineProfitPct.toStringAsFixed(1)}% after '
+                  'packing, bills, payment & returns and partner commission — below your ${rules.onlineMinFor(cat).toStringAsFixed(0)}%. '
+                  'Rule price: ₹${rules.onlinePrice(cost, cat, byWeight, market: ((p['market_price'] as num?)?.toDouble() ?? 0)).toStringAsFixed(0)}.'),
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Don't save")),
                 FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save anyway')),
