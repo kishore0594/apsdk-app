@@ -70,30 +70,59 @@ class PartnersScreen extends StatelessWidget {
   }
 }
 
-class _RulesCard extends StatelessWidget {
+class _RulesCard extends StatefulWidget {
   const _RulesCard();
 
   @override
+  State<_RulesCard> createState() => _RulesCardState();
+}
+
+class _RulesCardState extends State<_RulesCard> {
+  late Future<PriceRules> _rules = PriceRules.load(); // owner's current rates, not the defaults
+
+  Future<void> _toggle(PriceRules r, bool on) async {
+    await PriceRules.save(PriceRules.fromMap({...r.toMap(), 'partners_on': on}));
+    if (!mounted) return;
+    setState(() {
+      _rules = PriceRules.load();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(on
+            ? 'Partner programme ON — commission is included in online rule prices.'
+            : 'Partner programme OFF — online rule prices = cost + expenses + profit. Use Pricing → "Use rule prices" to update the website.')));
+  }
+
+  @override
   Widget build(BuildContext context) => FutureBuilder<PriceRules>(
-        future: PriceRules.load(), // owner's current rates, not the defaults
+        future: _rules,
         builder: (context, snap) => _card(snap.data ?? PriceRules.cached),
       );
 
   Widget _card(PriceRules r) {
     String n(double v) => v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    final admin = UserRole.instance.isAdmin;
     return Card(
-      color: const Color(0xFFF1F7EE),
+      color: r.partnersOn ? const Color(0xFFF1F7EE) : const Color(0xFFF3F4F6),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('How partners earn', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(
+              child: Text(r.partnersOn ? 'Partner programme: ON' : 'Partner programme: OFF',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            ),
+            if (admin) Switch(value: r.partnersOn, onChanged: (v) => _toggle(r, v)),
+          ]),
+          const SizedBox(height: 4),
           Text(
-            '• ${n(r.commissionPct)}% on millets, millet flour, grams & nuts\n'
-            '• ${n(r.riceCommissionPct)}% on rice · ₹${n(r.bagCommission)} per cattle-feed bag\n'
-            '• Only NEW customers, for ${Partners.linkDays} days — online orders and shop bills\n'
-            '• "Waiting" until the customer pays, then "Earned"; cancelled bills drop out\n'
-            '• Pay monthly by UPI — saved as a Marketing expense',
+            r.partnersOn
+                ? '• ${n(r.commissionPct)}% on millets, millet flour, grams & nuts\n'
+                    '• ${n(r.riceCommissionPct)}% on rice · ₹${n(r.bagCommission)} per cattle-feed bag\n'
+                    '• Only NEW customers, for ${Partners.linkDays} days — online orders and shop bills\n'
+                    '• "Waiting" until the customer pays, then "Earned"; cancelled bills drop out\n'
+                    '• Pay monthly by UPI — saved as a Marketing expense'
+                : 'No commission is added to online prices and no new commission is recorded. '
+                    'Partners and their past earnings are kept — switch ON any time.',
             style: const TextStyle(fontSize: 12.5, height: 1.45),
           ),
         ]),

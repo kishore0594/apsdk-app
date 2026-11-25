@@ -1152,7 +1152,8 @@ class DBHelper {
         }
       } catch (_) {/* offline with nothing cached: keep the link */}
     }
-    final partnerRules = (pId != null && pId.isNotEmpty) ? await PriceRules.load() : null;
+    var partnerRules = (pId != null && pId.isNotEmpty) ? await PriceRules.load() : null;
+    if (partnerRules != null && !partnerRules.partnersOn) partnerRules = null; // programme switched off
     // Bill discount shared over the items, so commission is on what was paid.
     final payFactor = subtotal > 0 ? ((subtotal - discount) / subtotal).clamp(0.0, 1.0).toDouble() : 1.0;
     double partnerTotal = 0;

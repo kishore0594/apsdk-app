@@ -76,7 +76,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _agingVendors = [];
   PatternSummary? _patterns;
   Pricing? _pricing;
-  int _belowTarget = 0;
+  int _belowTarget = 0; // products with a REAL price problem (cost up / loss)
+  double _salesShortDay = 0; // sales per day below this month's break-even
   int _newOrderCount = 0;
   StreamSubscription<int>? _ordersSub;
   List<Map<String, dynamic>> _weeklySales = [];
@@ -346,16 +347,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Products priced below their margin target (shop or online).
     var belowTarget = 0;
     // Same check as the Pricing screen and Reports, so the numbers match.
+    // Only real price problems (cost went up / selling at a loss).
+    var salesShortDay = 0.0;
     if (_pricing != null) {
       final rules = PriceRules.cached;
       for (final p in _rawProducts) {
-        if (RuleCheck.of(p, rules).below) belowTarget++;
+        if (RuleCheck.of(p, rules).alert) belowTarget++;
+      }
+      // This month: sales per day needed to cover the fixed bills (break-even)
+      // against today's pace — a SALES alert, not a price alert.
+      final now = DateTime.now();
+      final mStart = DateTime(now.year, now.month, 1).toIso8601String();
+      final mEnd = DateTime(now.year, now.month + 1, 1).toIso8601String();
+      final factor = <String, double>{};
+      for (final s in _rawSales) {
+        if (s['status'] == 'cancelled') continue;
+        final sub = (s['subtotal'] as num?)?.toDouble() ?? 0;
+        final disc = (s['discount'] as num?)?.toDouble() ?? 0;
+        factor[s['id'] as String] = sub > 0 ? ((sub - disc) / sub).clamp(0.0, 1.0).toDouble() : 1.0;
+      }
+      var sales = 0.0, cost = 0.0;
+      for (final it in _rawSaleItems) {
+        if (it['status'] == 'cancelled') continue;
+        final d = (it['sale_date'] ?? '').toString();
+        if (d.compareTo(mStart) < 0 || d.compareTo(mEnd) >= 0) continue;
+        final f = factor[it['sale_id']];
+        if (f == null) continue;
+        sales += ((it['subtotal'] as num?)?.toDouble() ?? 0) * f;
+        cost += ((it['unit_cost'] as num?)?.toDouble() ?? 0) * ((it['quantity'] as num?)?.toDouble() ?? 0);
+      }
+      final fixed = _pricing!.s.fixedTotal;
+      final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+      if (now.day >= 3 && sales > 0 && cost > 0 && fixed > 0) {
+        final gm = (sales - cost) / sales;
+        if (gm > 0.01) {
+          final needDay = fixed / gm / daysInMonth;
+          final nowDay = sales / now.day;
+          if (needDay > nowDay) salesShortDay = needDay - nowDay;
+        }
       }
     }
 
     setState(() {
       _patterns = patterns;
       _belowTarget = belowTarget;
+      _salesShortDay = salesShortDay;
       _todaysSales = todaysSales;
       _todaysCollections = todaysCollections;
       _outstandingCredit = outstandingCredit;
@@ -816,8 +852,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (_agingVendors.isNotEmpty)
         _TodoCard(Icons.hourglass_bottom, const Color(0xFFD97706), '${_agingVendors.length}', 'Dues older than 60 days',
             () => go(const FinanceScreen(initialTab: 4))),
+      if (_salesShortDay >= 1)
+        _TodoCard(Icons.trending_down, AppTheme.danger, formatCurrency(_salesShortDay), 'Sales/day below break-even',
+            () => go(const VendorInsightsScreen(initialGroup: CustGroup.due))),
       if (_belowTarget > 0)
-        _TodoCard(Icons.percent, const Color(0xFFD97706), '$_belowTarget', 'Prices below target',
+        _TodoCard(Icons.sell_outlined, const Color(0xFFD97706), '$_belowTarget', 'Prices to check (cost up / loss)',
             () => go(const ProductMarginsScreen())),
       if (_supplierDues > 0.5)
         _TodoCard(Icons.local_shipping_outlined, Colors.brown, formatCurrency(_supplierDues), 'To pay suppliers',

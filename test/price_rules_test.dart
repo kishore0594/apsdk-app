@@ -50,4 +50,25 @@ void main() {
     expect(r.lineCommission('Cattle Feeds', 3, 90, byKg: true), 0);
     expect(r.lineCommission('Millets', 1, 62, productPct: 5.36), closeTo(3.32, 0.01));
   });
+
+  test('partner programme OFF: no commission, lower online price', () {
+    final off = PriceRules.fromMap({'partners_on': false});
+    expect(off.commissionFor('Millets'), 0);
+    expect(off.lineCommission('Millets', 2, 136), 0);
+    expect(off.onlinePlan(38, 'Millets', true).price, 61); // (38 + 7) ÷ (1 − 10.5% − 3% − 12%)
+    expect(off.onlineBreak(61, 38, 'Millets', true).commission, 0);
+  });
+
+  test('cattle feed and rice use the 8% lowest profit', () {
+    expect(r.shopProfitFor('Cattle Feeds'), 8);
+    expect(r.shopProfitFor('Rice'), 8);
+    expect(r.shopProfitFor('Millets'), 12);
+  });
+
+  test('price alert only for cost up 3%+ with low profit, or a loss', () {
+    final up = {'cost_price': 2245, 'cost_prev': 1900, 'selling_price': 2650, 'category': 'Cattle Feeds', 'unit': 'Nos', 'web_visible': false};
+    expect(RuleCheck.of(up, r).alert, isTrue); // cost +18%, profit 4.8% < 8%
+    final steady = {'cost_price': 2245, 'selling_price': 2650, 'category': 'Cattle Feeds', 'unit': 'Nos', 'web_visible': false};
+    expect(RuleCheck.of(steady, r).alert, isFalse); // below target but cost did not go up: no alert
+  });
 }

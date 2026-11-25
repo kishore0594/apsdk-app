@@ -125,7 +125,7 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
       case _Filter.aboveMarket:
         return r.aboveMarket;
       case _Filter.costUp:
-        return r.costPrev > 0 && r.cost > r.costPrev;
+        return r.costPrev > 0 && r.cost >= r.costPrev * (1 + _rules.costAlertPct / 100);
       case _Filter.noCost:
         return r.cost <= 0;
       case _Filter.all:
@@ -253,7 +253,10 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
       'online_profit_min': TextEditingController(text: f(r.onlineProfitMin)),
       'online_profit_max': TextEditingController(text: f(r.onlineProfitMax)),
       'keep_pct': TextEditingController(text: f(r.keepPct)),
+      'bag_profit': TextEditingController(text: f(r.bagProfit)),
+      'cost_alert_pct': TextEditingController(text: f(r.costAlertPct)),
     };
+    var partnersOn = r.partnersOn;
     const labels = {
       'monthly_bills': 'Monthly bills ₹ (rent, wages, power…)',
       'target_revenue': 'Target sales per month ₹',
@@ -268,14 +271,26 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
       'online_profit_min': 'Online profit % — lowest',
       'online_profit_max': 'Online profit % — highest',
       'keep_pct': 'To meet market: keep at least this % of commission & profit',
+      'bag_profit': 'Lowest profit % for cattle feed and rice',
+      'cost_alert_pct': 'Alert when cost goes up by % or more',
     };
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) => AlertDialog(
         title: const Text('Price rules'),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Partner programme'),
+              subtitle: Text(partnersOn
+                  ? 'ON — online prices include partner commission'
+                  : 'OFF — online price = cost + expenses + profit (no commission)'),
+              value: partnersOn,
+              onChanged: (v) => setD(() => partnersOn = v),
+            ),
             for (final k in c.keys)
+              if (partnersOn || !const ['commission_pct', 'rice_commission_pct', 'bag_commission', 'keep_pct'].contains(k))
               TextField(
                 controller: c[k],
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -287,10 +302,10 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
         ],
-      ),
+      )),
     );
     if (ok != true) return;
-    final m = <String, dynamic>{...r.toMap()};
+    final m = <String, dynamic>{...r.toMap(), 'partners_on': partnersOn};
     for (final e in c.entries) {
       final v = double.tryParse(e.value.text.trim());
       if (v != null && v >= 0) m[e.key] = v;
@@ -621,6 +636,7 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
       ..sort((a, b) => (a.worstGap).compareTo(b.worstGap));
     final inCat = _cat.isEmpty ? all : all.where((r) => r.category.toLowerCase() == _cat).toList();
     final below = inCat.where((r) => r.cost > 0 && (r.shopBelow || r.webBelow)).length;
+    final alerts = inCat.where((r) => RuleCheck.of(r.p, ru).alert).length;
     final noCost = inCat.where((r) => r.cost <= 0).length;
     final admin = UserRole.instance.isAdmin;
     String n(double v) => v % 1 == 0 ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
@@ -643,18 +659,20 @@ class _ProductMarginsScreenState extends State<ProductMarginsScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('$below products below profit · $noCost without cost price',
+                      Text('$alerts need a price check (cost up ${n(ru.costAlertPct)}%+ or loss) · $below below target · $noCost without cost',
                           style: TextStyle(
                               fontWeight: FontWeight.w800,
                               fontSize: 15,
-                              color: below > 0 ? lightColor(Light.red) : lightColor(Light.green))),
+                              color: alerts > 0 ? lightColor(Light.red) : lightColor(Light.green))),
+                      const Text('Prices are judged at normal sales, so a slow month never asks for higher prices.',
+                          style: TextStyle(fontSize: 11.5, color: Colors.black54)),
                       const SizedBox(height: 6),
                       Text(
                         'Every price = cost + expenses + commission + net profit.\n'
                         '• Expenses: shop bills ${n(ru.billsPct)}% (₹${n(ru.monthlyBills)} ÷ ₹${n(ru.targetRevenue)} sales + '
                         '${n(ru.creditPct)}% credit). Online also packing ₹${n(ru.packCost)} a pack and ${n(ru.payPct)}% payment & returns.\n'
-                        '• Commission (online): ${n(ru.commissionPct)}% for partners — rice ${n(ru.riceCommissionPct)}%.\n'
-                        '• Profit: shop ${n(ru.shopProfit)}% · online ${n(ru.onlineProfitMin)}–${n(ru.onlineProfitMax)}%. '
+                        '${ru.partnersOn ? '• Commission (online): ${n(ru.commissionPct)}% for partners — rice ${n(ru.riceCommissionPct)}%.' : '• Partner programme OFF — no commission in online prices.'}\n'
+                        '• Profit: shop ${n(ru.shopProfit)}% · online ${n(ru.onlineProfitMin)}–${n(ru.onlineProfitMax)}% · cattle feed & rice ${n(ru.bagProfit)}%. '
                         'Delivery is charged at checkout, not in the price.\n'
                         'Tap ✏ to change a price and see the four parts change.',
                         style: const TextStyle(fontSize: 12, color: Colors.black54, height: 1.35),

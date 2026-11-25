@@ -829,6 +829,20 @@ class FinanceService {
   }
 
   int? _below;
+  int? _alerts;
+
+  /// Products with a REAL price problem: selling at a loss, or cost went up
+  /// and the price no longer gives the category's profit.
+  int priceAlertCount() {
+    final cached = _alerts;
+    if (cached != null) return cached;
+    final rules = PriceRules.cached;
+    var n = 0;
+    for (final p in _products.values) {
+      if (RuleCheck.of(p, rules).alert) n++;
+    }
+    return _alerts = n;
+  }
 
   /// Products whose shop or online price is under the margin target.
   int belowTargetCount() {

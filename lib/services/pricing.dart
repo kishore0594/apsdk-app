@@ -84,6 +84,9 @@ class PriceRules {
   final double shopProfit; // shop profit %
   final double onlineProfitMin, onlineProfitMax;
   final double keepPct; // competitive: keep at least this % of commission & profit
+  final bool partnersOn; // partner programme on: commission is part of online prices
+  final double bagProfit; // lowest profit % for cattle feed and rice (bags)
+  final double costAlertPct; // alert when cost rose by this % or more
   final Map<String, double> catShopProfit; // category (lower case) -> shop profit %
   final Map<String, double> catOnlineProfit; // category (lower case) -> lowest online profit %
 
@@ -101,6 +104,9 @@ class PriceRules {
     this.onlineProfitMin = 12,
     this.onlineProfitMax = 15,
     this.keepPct = 50,
+    this.partnersOn = true,
+    this.bagProfit = 8,
+    this.costAlertPct = 3,
     this.catShopProfit = const {},
     this.catOnlineProfit = const {},
   });
@@ -123,6 +129,9 @@ class PriceRules {
         onlineProfitMin: _d(m['online_profit_min'], 12),
         onlineProfitMax: _d(m['online_profit_max'], 15),
         keepPct: _d(m['keep_pct'], 50).clamp(0, 100).toDouble(),
+        partnersOn: m['partners_on'] is bool ? m['partners_on'] as bool : true,
+        bagProfit: _d(m['bag_profit'], 8),
+        costAlertPct: _d(m['cost_alert_pct'], 3),
         catShopProfit: _m(m['cat_shop_profit']),
         catOnlineProfit: _m(m['cat_online_profit']),
       );
@@ -141,6 +150,9 @@ class PriceRules {
         'online_profit_min': onlineProfitMin,
         'online_profit_max': onlineProfitMax,
         'keep_pct': keepPct,
+        'partners_on': partnersOn,
+        'bag_profit': bagProfit,
+        'cost_alert_pct': costAlertPct,
         'cat_shop_profit': catShopProfit,
         'cat_online_profit': catOnlineProfit,
       };
@@ -189,8 +201,12 @@ class PriceRules {
   static bool isBagCategory(String category) =>
       _has(category.toLowerCase(), ['cattle', 'feed', 'bran', 'thavidu', 'punnaku', 'தீவன']);
 
-  double shopProfitFor(String category) => catShopProfit[category.trim().toLowerCase()] ?? shopProfit;
-  double onlineMinFor(String category) => catOnlineProfit[category.trim().toLowerCase()] ?? onlineProfitMin;
+  /// Cattle feed and rice (bags) have their own lowest profit [bagProfit].
+  static bool lowMarginCategory(String category) => isBagCategory(category) || isRice(category);
+  double shopProfitFor(String category) =>
+      catShopProfit[category.trim().toLowerCase()] ?? (lowMarginCategory(category) ? bagProfit : shopProfit);
+  double onlineMinFor(String category) =>
+      catOnlineProfit[category.trim().toLowerCase()] ?? (lowMarginCategory(category) ? bagProfit : onlineProfitMin);
   double onlineMaxFor(String category) => onlineMinFor(category) + math.max(0, onlineProfitMax - onlineProfitMin);
   bool hasCategoryProfit(String category) {
     final c = category.trim().toLowerCase();
@@ -199,7 +215,7 @@ class PriceRules {
 
   /// Normal partner commission % of the price for a category (bags: ₹ per bag).
   double commissionFor(String category) {
-    if (isBagCategory(category)) return 0;
+    if (!partnersOn || isBagCategory(category)) return 0;
     if (isRice(category)) return riceCommissionPct;
     return commissionPct;
   }
@@ -208,6 +224,7 @@ class PriceRules {
   /// product's own (cut) commission when its price was set to meet the
   /// market. Cattle feed earns ₹ per bag (nothing on loose feed by the kg).
   double lineCommission(String category, double qty, double lineAmount, {bool byKg = false, double? productPct}) {
+    if (!partnersOn) return 0;
     if (isBagCategory(category)) return byKg ? 0 : bagCommission * qty;
     return lineAmount * (productPct ?? commissionFor(category)) / 100;
   }
@@ -287,7 +304,11 @@ class PriceRules {
         price: price,
         cost: cost,
         expenses: packFor(perKg) + price * (billsPct + payPct) / 100,
-        commission: isBagCategory(category) ? bagCommission : price * (productPct ?? commissionFor(category)) / 100,
+        commission: !partnersOn
+            ? 0
+            : isBagCategory(category)
+                ? bagCommission
+                : price * (productPct ?? commissionFor(category)) / 100,
       );
 }
 
@@ -298,14 +319,25 @@ class PriceRules {
 class RuleCheck {
   final bool shopBelow, onlineBelow;
   final double shopProfitPct, onlineProfitPct;
-  const RuleCheck(this.shopBelow, this.onlineBelow, this.shopProfitPct, this.onlineProfitPct);
+  /// Cost rose by the alert % or more (compared with the previous cost).
+  final bool costUp;
+  /// Shop or online price doesn't even cover cost + expenses.
+  final bool loss;
+  const RuleCheck(this.shopBelow, this.onlineBelow, this.shopProfitPct, this.onlineProfitPct,
+      {this.costUp = false, this.loss = false});
   bool get below => shopBelow || onlineBelow;
+  /// A REAL price problem worth an alert: selling at a loss, or the cost went
+  /// up and the price no longer gives the category's profit. Low sales are
+  /// never a reason to raise prices.
+  bool get alert => loss || (costUp && below);
 
   static double _n(Object? v) => v is num ? v.toDouble() : 0.0;
 
   static RuleCheck of(Map<String, dynamic> p, PriceRules r, {double? onlinePriceOverride}) {
     final cost = _n(p['cost_price']);
     if (cost <= 0) return const RuleCheck(false, false, 0, 0);
+    final prev = _n(p['cost_prev']);
+    final costUp = prev > 0 && cost >= prev * (1 + r.costAlertPct / 100);
     final cat = FinanceService.tidy(p['category'] as String?);
     final perKg = FinanceService.perKgUnit(p);
     final shop = _n(p['selling_price']);
@@ -314,13 +346,14 @@ class RuleCheck {
     final webSet = _n(p['web_price']);
     final web = onlinePriceOverride ?? (webSet > 0 ? webSet : shop);
     final online = p['web_visible'] != false && web > 0;
-    if (!online) return RuleCheck(shopBelow, false, shopB.profitPct, 0);
+    if (!online) return RuleCheck(shopBelow, false, shopB.profitPct, 0, costUp: costUp, loss: shop > 0 && shopB.profit < 0);
     final own = (p['partner_pct'] as num?)?.toDouble();
     final webB = r.onlineBreak(web, cost, cat, perKg, productPct: own);
     final plan = r.onlinePlan(cost, cat, perKg, market: _n(p['market_price']));
     final competitive = plan.commissionCut && (web - plan.price).abs() < 1;
     final onlineBelow = !competitive && webB.profitPct < r.onlineMinFor(cat) - 0.5;
-    return RuleCheck(shopBelow, onlineBelow, shopB.profitPct, webB.profitPct);
+    return RuleCheck(shopBelow, onlineBelow, shopB.profitPct, webB.profitPct,
+        costUp: costUp, loss: (shop > 0 && shopB.profit < 0) || (!competitive && webB.profit < 0));
   }
 }
 

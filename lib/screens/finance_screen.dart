@@ -273,6 +273,20 @@ class _Overview extends StatelessWidget {
     final net = period.isCurrent ? f.projectedNetMargin : f.netMargin;
     final gapRs = (period.isCurrent ? f.projectedSales : f.netSales) * t / 100 -
         (period.isCurrent ? f.projectedNet : f.netProfit);
+    // WHY profit is short — split so low sales never look like a price problem:
+    // low sales = fixed bills beyond their planned share (price rules: bills ÷
+    // target sales); losses = credit delay, bad debts, stock loss; the rest =
+    // prices, discounts and product mix.
+    final rules = PriceRules.cached;
+    final salesBase = period.isCurrent ? f.projectedSales : f.netSales;
+    final plannedShare = rules.targetRevenue > 0 ? rules.monthlyBills / rules.targetRevenue : 0.1;
+    final salesGap = gapRs <= 0 ? 0.0 : (f.expectedExpenses - salesBase * plannedShare).clamp(0.0, gapRs).toDouble();
+    final lossGap = gapRs <= 0 ? 0.0 : (f.losses * (period.isCurrent ? f.projectedSales / (f.netSales > 0 ? f.netSales : 1) : 1))
+        .clamp(0.0, gapRs - salesGap).toDouble();
+    final priceGap = (gapRs - salesGap - lossGap).clamp(0.0, double.infinity).toDouble();
+    final be = f.breakEven;
+    final needDay = be == null ? 0.0 : be / period.totalDays;
+    final nowDay = f.netSales / (period.elapsedDays > 0 ? period.elapsedDays : 1);
     final kpis = [
       Kpi.netProfit,
       Kpi.grossMargin,
@@ -306,10 +320,24 @@ class _Overview extends StatelessWidget {
               Text(
                 net >= t
                     ? 'On target (${pct(t)} after all expenses).'
-                    : 'Target ${pct(t)} after all expenses — short by ${rs(gapRs)}${period.isCurrent ? ' at this pace' : ''}. '
-                        'See "Low-profit culprits" for what pulls it down.',
+                    : 'Target ${pct(t)} after all expenses — short by ${rs(gapRs)}${period.isCurrent ? ' at this pace' : ''}.',
                 style: const TextStyle(fontSize: 13, height: 1.3),
               ),
+              if (net < t && gapRs > 0) ...[
+                const SizedBox(height: 8),
+                const Text('Why:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                if (salesGap >= 1)
+                  _WhyLine(Icons.trending_down, const Color(0xFFDC2626), 'Low sales ${rs(salesGap)}',
+                      'Fixed bills ${rs(f.expectedExpenses)} are planned on ${rs(rules.targetRevenue * period.months)} sales. '
+                      '${be != null && needDay > nowDay ? 'Break-even needs ${rs(needDay)}/day — now ${rs(nowDay)}/day (${rs(needDay - nowDay)}/day short). ' : ''}'
+                      'Fix: more customers and bills — not higher prices.'),
+                if (priceGap >= 1)
+                  _WhyLine(Icons.sell_outlined, const Color(0xFFD97706), 'Prices, discounts & mix ${rs(priceGap)}',
+                      'Gross margin ${pct(f.grossMargin)}. ${svc.priceAlertCount() > 0 ? '${svc.priceAlertCount()} products need a price check (cost went up, or selling at a loss).' : 'No product needs a price check — look at discounts and low-margin items.'}'),
+                if (lossGap >= 1)
+                  _WhyLine(Icons.hourglass_bottom, Colors.blueGrey, 'Credit & losses ${rs(lossGap)}',
+                      'Money waiting with customers, bad debts and stock loss.'),
+              ],
             ]),
           ),
         ),
@@ -343,12 +371,14 @@ class _Overview extends StatelessWidget {
   static int _n(FinScale s) => switch (s) { FinScale.month => 12, FinScale.quarter => 8, FinScale.year => 5 };
 
   List<Widget> _warnings(FinFigures f) => [
-        if (period.isCurrent && svc.belowTargetCount() > 0)
+        // Only REAL price problems — never "raise prices because sales are low".
+        if (period.isCurrent && svc.priceAlertCount() > 0)
           Builder(
             builder: (context) => InkWell(
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProductMarginsScreen())),
-              child: _Warn('${svc.belowTargetCount()} products are priced below their margin target (shop or online). '
-                  'Tap to open Pricing and apply the suggested prices.'),
+              child: _Warn('${svc.priceAlertCount()} products need a price check: cost went up ${PriceRules.cached.costAlertPct.toStringAsFixed(0)}% or more, '
+                  'or the price doesn\'t cover cost + expenses. Prices are judged at normal sales '
+                  '(${rs(PriceRules.cached.targetRevenue)} a month), so low sales never ask for higher prices. Tap to open Pricing.'),
             ),
           ),
         if (f.costMissingLines > 0)
@@ -450,7 +480,9 @@ String kpiSubtitle(FinanceService svc, Kpi k, FinFigures f) {
           ? 'Pace ${rs(f.projectedSales)} · ${vs(f.projectedSales, prev.netSales)}'
           : vs(f.netSales, prev.netSales);
     case Kpi.expenseRatio:
-      return 'Max ${pct(s.maxExpense)} · ${rs(f.expectedExpenses)} expenses';
+      final planned = PriceRules.cached.targetRevenue * f.period.months;
+      return 'Max ${pct(s.maxExpense)} · ${rs(f.expectedExpenses)} expenses'
+          '${f.expenseRatio > s.maxExpense && planned > 0 && (f.period.isCurrent ? f.projectedSales : f.netSales) < planned ? ' — high because sales are low (at ${rs(planned)} it is ${pct(f.expectedExpenses / planned * 100)})' : ''}';
     case Kpi.breakEven:
       final ts = f.targetSales(s.targetNet);
       return 'For ${pct(s.targetNet)} profit: ${ts == null ? 'raise margin first' : rs(ts)}';
@@ -1432,4 +1464,27 @@ Future<void> shareStatement(BuildContext context, FinanceService svc, FinPeriod 
   final file = File('${dir.path}/madhura_statement_${DateFormat('yyyy_MM').format(period.start)}_${period.scale.name}.csv');
   await file.writeAsString('\uFEFF$csv');
   await Share.shareXFiles([XFile(file.path, mimeType: 'text/csv')], text: 'Financial statement — ${period.label}');
+}
+
+/// One reason in the "Why" list under the net-profit card.
+class _WhyLine extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title, detail;
+  const _WhyLine(this.icon, this.color, this.title, this.detail);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(TextSpan(children: [
+              TextSpan(text: '$title\n', style: TextStyle(fontWeight: FontWeight.w800, color: color, fontSize: 13)),
+              TextSpan(text: detail, style: const TextStyle(fontSize: 12.5, height: 1.3)),
+            ])),
+          ),
+        ]),
+      );
 }
